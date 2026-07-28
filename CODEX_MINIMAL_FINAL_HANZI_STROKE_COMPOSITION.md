@@ -160,7 +160,7 @@ hanzi\_writing/geometry.py
 ```bash
 python hanzi\_writing/hanzi\_geometry\_final.py \\
   --self-test \\
-  --target-long-medium-steps 150 \\
+  --target-long-medium-steps 85 \\
   --output-dir artifacts/final\_hanzi\_geometry
 ```
 
@@ -169,7 +169,7 @@ python hanzi\_writing/hanzi\_geometry\_final.py \\
 ```text
 overall\_passed = true
 penup\_transition\_count = 12
-longest medium intervals = 150
+longest medium intervals = 85
 ```
 
 \---
@@ -262,7 +262,7 @@ train\_speed\_scalar:
 脚本以：
 
 ```text
-最长书写笔画在中速条件下 = 150 intervals
+最长书写笔画在中速条件下 = 85 intervals
 ```
 
 计算唯一全局尺度。
@@ -271,7 +271,7 @@ train\_speed\_scalar:
 
 ```text
 global\_scale\_m\_per\_design\_unit
-= 0.0004385964912280702
+= 0.00024853801169590643
 ```
 
 所有笔画、汉字布局和移笔距离统一乘同一个尺度。
@@ -281,7 +281,7 @@ global\_scale\_m\_per\_design\_unit
 * 笔画特异缩放；
 * 汉字特异缩放；
 * 为通过工作空间审查自动缩小某个字；
-* 不经用户批准改变 150-step 目标。
+* 不经用户另行批准改变审计后确定的 85-step 目标。
 
 ### 5.3 采样
 
@@ -586,7 +586,7 @@ move rule 决定“执行移笔”
 * 网络负责复用与执行笔画/移笔计算；
 * 结论限定为“受外部指令调用的时序组合”，不宣称自主规划。
 
-### 风险 F：150-step 物理尺度可能超出 MotorNet 工作空间
+### 风险 F：初始 150-step 物理尺度超出 MotorNet 工作空间
 
 这是当前唯一不能只靠几何脚本消除的实施门槛。
 
@@ -598,7 +598,12 @@ move rule 决定“执行移笔”
 
 禁止自动改尺度。由用户决定是否降低最长中速步数。
 
-### 风险 G：完整 trial 约 900 steps，可能出现长时隐藏状态漂移
+2026-07-28 服务器审计确认：150-step 尺度有 92/305 个条件越过关节限位；逐整数尺度
+扫描中 1–90 全部通过、91 首次失败。用户批准采用 85 steps，不采用仅有
+0.002938234 rad 最小关节余量的边界值 90。85-step 尺度的最小关节余量为
+0.037491513 rad，必须在正式训练前重新运行完整审计。
+
+### 风险 G：完整 trial 是长时序，可能出现隐藏状态漂移
 
 处理：
 
@@ -619,7 +624,7 @@ move rule 决定“执行移笔”
 ```bash
 python hanzi\_writing/hanzi\_geometry\_final.py \\
   --self-test \\
-  --target-long-medium-steps 150 \\
+  --target-long-medium-steps 85 \\
   --output-dir artifacts/final\_hanzi\_geometry
 ```
 
@@ -664,7 +669,7 @@ final\_hanzi\_trajectories\_physical.png
 * 钩为向左上直线；
 * 钩与竖的夹角为 `60° ± 0.2°`；
 * 全部坐标有限；
-* 最长笔画中速为 150 intervals；
+* 最长笔画中速为 85 intervals；
 * 共有 12 个真实移笔转换。
 
 ### D. 工作空间审查
@@ -710,7 +715,7 @@ move: 一个 jitter transition
 
 * 无 NaN/Inf；
 * episode 正常结束；
-* 约 900-step 完整 schedule 可运行；
+* 完整 schedule 可运行，且实际步数与权威脚本生成的长度完全一致；
 * MotorNet 不越界；
 * loss 和逐段指标可记录；
 * writing mask 正确；
@@ -767,7 +772,7 @@ geometry\_source: hanzi\_writing/hanzi\_geometry\_final.py
 rule\_count\_active: 9
 rule\_dim\_total: 10
 unused\_rule\_index: 9
-target\_long\_medium\_steps: 150
+target\_long\_medium\_steps: 85
 dt\_s: 0.01
 train\_speed\_mps:
   fast: 0.5

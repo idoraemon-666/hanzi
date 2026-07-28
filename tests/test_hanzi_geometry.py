@@ -24,6 +24,8 @@ class HanziGeometryTests(unittest.TestCase):
         self.config = load_geometry_config(GEOMETRY_CONFIG)
 
     def test_authority_schedule_and_hold_go_cue(self):
+        self.assertEqual(authority.TARGET_LONG_MEDIUM_STEPS, 85)
+        self.assertEqual(self.config.target_long_medium_steps, 85)
         report = authority.run_self_test()
         self.assertTrue(report["overall_passed"], report["failures"])
         characters, _ = authority.physical_characters()

@@ -4,7 +4,7 @@
   "rule_count_active": 9,
   "rule_dim_total": 10,
   "unused_rule_index": 9,
-  "target_long_medium_steps": 150,
+  "target_long_medium_steps": 85,
   "train_speed_mps": {
     "fast": 0.5,
     "medium": 0.25,

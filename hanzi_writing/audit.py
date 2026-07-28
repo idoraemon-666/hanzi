@@ -20,6 +20,7 @@ from hanzi_writing.geometry import (
     StrokeCondition,
     characters,
     checkpoint_stroke_groups,
+    cue_scale,
     load_geometry_config,
     move_conditions,
     stroke_conditions,
@@ -249,10 +250,27 @@ def _component_smoke(
     }
 
 
-def _character_smoke(policy, hp: dict[str, Any], geometry_path: str) -> dict[str, Any]:
+def _character_smoke(
+    policy,
+    hp: dict[str, Any],
+    geometry: GeometryConfig,
+    geometry_path: str,
+) -> dict[str, Any]:
     before = _state_clone(policy)
     rows = {}
+    validation_characters = characters(geometry)
+    validation_cue_scale = cue_scale(geometry)
     for name in ("mu", "jiang", "ke"):
+        expected_timesteps = len(
+            authority.assemble_character_schedule(
+                validation_characters[name],
+                speed_name="medium",
+                stable_steps=geometry.stable_steps,
+                prepare_steps=geometry.prepare_steps,
+                final_hold_steps=geometry.hold_steps,
+                cue_normalizer_m=validation_cue_scale,
+            )["target_xy_m"]
+        )
         env = HanziCharacterEnv(
             effector=_make_effector(),
             geometry_config_path=geometry_path,
@@ -271,6 +289,7 @@ def _character_smoke(policy, hp: dict[str, Any], geometry_path: str) -> dict[str
         ).sum(axis=1)
         rows[name] = {
             "timesteps": len(error),
+            "expected_timesteps_from_authority": expected_timesteps,
             "episode_terminated_exactly": result["episode_terminated_exactly"],
             "all_values_finite": bool(
                 np.isfinite(result["actual"]).all()
@@ -297,7 +316,7 @@ def _character_smoke(policy, hp: dict[str, Any], geometry_path: str) -> dict[str
         "passed": all(
             row["all_values_finite"]
             and row["episode_terminated_exactly"]
-            and 800 <= row["timesteps"] <= 1000
+            and row["timesteps"] == row["expected_timesteps_from_authority"]
             for row in rows.values()
         ),
     }
@@ -375,7 +394,7 @@ def run_audit(
     for parameter in policy.parameters():
         parameter.requires_grad_(False)
     component_smoke = _component_smoke(policy, hp, geometry, str(geometry_path))
-    character_smoke = _character_smoke(policy, hp, str(geometry_path))
+    character_smoke = _character_smoke(policy, hp, geometry, str(geometry_path))
     overall = bool(
         self_test["overall_passed"]
         and workspace["passed"]

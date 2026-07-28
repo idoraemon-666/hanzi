@@ -48,6 +48,7 @@ character-local 坐标除以权威脚本给出的 `cue_scale_m`；字符名和�
 
 ```yaml
 dt_s: 0.01
+target_long_medium_steps: 85
 train_speed_mps:
   fast: 0.5
   medium: 0.25
@@ -61,6 +62,11 @@ delay_steps: [25, 50, 75]
 hold_steps: 25
 prepare_steps_in_complete_characters: 25
 ```
+
+`target_long_medium_steps = 85` 是 2026-07-28 服务器工作空间审计后的用户批准值：初始
+150-step 尺度有 92/305 个条件越过 MotorNet 关节限位；逐整数扫描中 1–90 全部通过、
+91 首次失败。用户选择 85 而非贴近限位的数学最大值 90；85 的最小关节余量为
+0.037491513 rad。未经用户另行批准不得改变该值。
 
 每条笔画和 move 按 `ceil(length / (speed * dt))` 确定 interval 数，再做线性弧长重采样。
 movement 同时监督首尾点，共有 `intervals + 1` 个样本。
@@ -157,7 +163,7 @@ L_total = L_position + L_rate + L_weight + L_muscle + L_simple_dynamics
 3. 9-rule sampler、stroke jitter 和 81 组 checkpoint 网格；
 4. 三个字、全部 isolated stroke placements、全部 exact/jitter move 的 MotorNet workspace；
 5. 指定的 heng/shu/na/hengzhe/shugou/move 短闭环；
-6. `mu`、`jiang`、`ke` 约 900-step 未训练 deterministic frozen smoke；
+6. `mu`、`jiang`、`ke` 未训练 deterministic frozen smoke，实际步数必须精确等于权威 schedule 长度；
 7. 无 NaN/Inf、episode 正常结束、五项损失可记录、冻结和数据泄漏检查。
 
 工作空间失败时只报告并停止，不得自动缩放、改速度或改模型。
@@ -178,4 +184,4 @@ server/run_hanzi_stroke_temporal_composition_validate_characters.sh
 审计脚本可以创建环境并执行所有测试，但不能启动正式训练。正式 75,000-update 训练和训练后的
 冻结整字验证均由独立授权标签保护。
 
-当前状态：尚未启动 75,000 updates 正式训练。
+当前状态：85-step 尺度已获用户批准，必须重新通过完整服务器审计；尚未启动 75,000 updates 正式训练。
