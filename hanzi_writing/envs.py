@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Sequence
 
+import gymnasium as gym
 import numpy as np
 import torch as th
 from motornet import environment as env
@@ -48,6 +49,24 @@ class _HanziEnvironment(env.Environment):
         self.obs_noise[: self.skeleton.space_dim] = [0.0] * self.skeleton.space_dim
         self.dt = self.geometry_config.dt_seconds
         self.anchor_m = baseline_anchor(self.effector)
+
+    def _build_spaces(self) -> None:
+        """Declare the fixed spaces without MotorNet 0.2 virtual-reset dispatch."""
+
+        self.action_space = gym.spaces.Box(
+            low=0.0,
+            high=1.0,
+            shape=(self.effector.n_muscles,),
+            dtype=np.float32,
+        )
+        self.observation_space = gym.spaces.Box(
+            low=-np.inf,
+            high=np.inf,
+            shape=(28,),
+            dtype=np.float32,
+        )
+        self.action_noise = [self._action_noise] * self.action_space.shape[0]
+        self.obs_noise = [self._obs_noise] * self.observation_space.shape[0]
 
     def get_obs(
         self,

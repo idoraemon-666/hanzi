@@ -53,6 +53,24 @@ class HanziEnvironmentTests(unittest.TestCase):
         self.assertTrue(bool(torch.all(env.go_cue[:, hold_start:hold_end] == 0.0)))
         self.assertEqual(movement_end - movement_start, env.movement_intervals + 1)
 
+    def test_space_construction_does_not_require_a_trial_condition(self):
+        component = HanziComponentEnv(
+            effector=make_effector(),
+            geometry_config_path=GEOMETRY_CONFIG,
+            action_frame_stacking=0,
+        )
+        character = HanziCharacterEnv(
+            effector=make_effector(),
+            geometry_config_path=GEOMETRY_CONFIG,
+            action_frame_stacking=0,
+        )
+        self.assertEqual(component.observation_space.shape, (28,))
+        self.assertEqual(character.observation_space.shape, (28,))
+        self.assertEqual(component.action_space.shape, (6,))
+        self.assertEqual(character.action_space.shape, (6,))
+        self.assertFalse(hasattr(component, "conditions"))
+        self.assertFalse(hasattr(character, "character_name"))
+
     def test_move_goal_cue_is_present_only_during_delay_and_movement(self):
         condition = move_conditions(self.config, include_jitter=False)[0]
         env = HanziComponentEnv(
