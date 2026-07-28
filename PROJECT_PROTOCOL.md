@@ -78,6 +78,13 @@ go cue 的固定语义是：stable/prepare/delay 为 0，movement 为 1，hold �
 训练只包含 15 个孤立笔画 primitive 和通用 move。每次 update 先在 9 个 rule 中均匀采样，
 再在该 rule 内均匀采样条件、三档速度和 delay，禁止直接对全部条件做总体均匀采样。
 
+batch 内不采样方向。每次 update 均匀选择 rule、speed、delay 和一个 rule 内参考条件，
+再从与参考条件具有相同 rule、speed 和 movement interval 数的兼容组中，为 32 个样本
+有放回地独立采样条件。参考条件的均匀采样使每个训练条件保持均匀边际概率；相同时长
+约束禁止隐式 padding 或改变 phase-normalized loss。书写笔画的批内差异只来自 primitive
+放置起点及固定 jitter，不改变标准正立方向，spatial cue 仍固定为 `[0, 0]`。move 可在
+时长兼容时使用不同起点和目标 cue；兼容组只有一个条件时允许自然重复。
+
 笔画起点覆盖中心和该 rule 在三个汉字中的全部唯一真实起点。每个 primitive 与该 rule 的
 所有起点交叉；每个基础起点增加 4 个逐轴独立的均匀 jitter：
 

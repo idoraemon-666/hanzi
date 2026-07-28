@@ -30,6 +30,7 @@ from hanzi_writing.motornet_support import baseline_anchor
 from hanzi_writing.training import (
     _assert_state_equal,
     _character_rollout,
+    _condition_manifest,
     _hp_from_config,
     _l1_rows,
     _make_effector,
@@ -371,12 +372,15 @@ def run_audit(
     condition_tables = _condition_tables(geometry)
     _write_json(output / "condition_tables.json", condition_tables)
     grouped = training_conditions_by_rule(geometry)
+    condition_manifest = _condition_manifest(geometry)
     sampler = {
+        "sampler": condition_manifest["sampler"],
         "active_rules": list(grouped),
         "condition_count_by_rule": {rule: len(values) for rule, values in grouped.items()},
         "uniform_rule_probability": 1.0 / len(grouped),
         "contains_complete_character_sequence": False,
         "character_name_enters_observation": False,
+        "batch_condition_sampling": condition_manifest["batch_condition_sampling"],
         "checkpoint_stroke_group_count": len(checkpoint_stroke_groups(geometry)),
         "checkpoint_exact_move_count": len(move_conditions(geometry, include_jitter=False)),
         "checkpoint_rollout_group_count_three_speeds": (

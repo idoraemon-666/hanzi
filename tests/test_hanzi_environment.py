@@ -71,6 +71,25 @@ class HanziEnvironmentTests(unittest.TestCase):
         self.assertFalse(hasattr(component, "conditions"))
         self.assertFalse(hasattr(character, "character_name"))
 
+    def test_compatible_stroke_placements_can_share_one_batch(self):
+        conditions = checkpoint_stroke_groups(self.config)[0]
+        env = HanziComponentEnv(
+            effector=make_effector(),
+            geometry_config_path=GEOMETRY_CONFIG,
+            action_frame_stacking=0,
+        )
+        obs, _ = env.reset(
+            options={
+                "conditions": conditions,
+                "speed_name": "medium",
+                "delay_steps": 50,
+                "deterministic": True,
+            }
+        )
+        self.assertEqual(tuple(obs.shape), (len(conditions), 28))
+        self.assertTrue(bool(torch.all(env.vis_inp == 0.0)))
+        self.assertGreater(len(torch.unique(env.initial_pos, dim=0)), 1)
+
     def test_move_goal_cue_is_present_only_during_delay_and_movement(self):
         condition = move_conditions(self.config, include_jitter=False)[0]
         env = HanziComponentEnv(

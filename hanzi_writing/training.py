@@ -26,7 +26,9 @@ from hanzi_writing.geometry import (
     GeometryConfig,
     MoveCondition,
     StrokeCondition,
+    build_component_trajectory,
     checkpoint_stroke_groups,
+    cue_scale,
     load_geometry_config,
     move_conditions,
     training_conditions_by_rule,
@@ -110,7 +112,7 @@ def validate_training_config(config: dict[str, Any]) -> GeometryConfig:
         "max_updates": 75000,
         "validation_interval": 500,
         "log_interval": 100,
-        "sampler": "uniform_rule_then_uniform_condition_speed_delay",
+        "sampler": "uniform_rule_speed_delay_reference_condition_then_compatible_batch",
     }:
         raise ValueError("training schedule or sampler differs from the accepted protocol")
     if config["position_loss"] != {
@@ -289,14 +291,74 @@ def checkpoint_validation(policy, hp: dict[str, Any], geometry: GeometryConfig) 
     }
 
 
+def _duration_compatibility_index(
+    geometry: GeometryConfig,
+    conditions_by_rule: dict[str, tuple[StrokeCondition | MoveCondition, ...]],
+) -> dict[str, dict[str, dict[str, tuple[StrokeCondition | MoveCondition, ...]]]]:
+    normalizer = cue_scale(geometry)
+    index: dict[
+        str,
+        dict[str, dict[str, tuple[StrokeCondition | MoveCondition, ...]]],
+    ] = {}
+    for rule, conditions in conditions_by_rule.items():
+        index[rule] = {}
+        for speed_name in SPEED_NAMES:
+            by_duration: dict[int, list[StrokeCondition | MoveCondition]] = defaultdict(list)
+            for condition in conditions:
+                trajectory = build_component_trajectory(condition, speed_name, normalizer)
+                by_duration[trajectory.movement_intervals].append(condition)
+            index[rule][speed_name] = {
+                condition.condition_id: tuple(by_duration[duration])
+                for duration, group in by_duration.items()
+                for condition in group
+            }
+    return index
+
+
+def _sample_compatible_condition_batch(
+    conditions: tuple[StrokeCondition | MoveCondition, ...],
+    compatible_by_condition_id: dict[
+        str, tuple[StrokeCondition | MoveCondition, ...]
+    ],
+    batch_size: int,
+    *,
+    rng: Any = random,
+) -> tuple[
+    StrokeCondition | MoveCondition,
+    tuple[StrokeCondition | MoveCondition, ...],
+]:
+    reference = rng.choice(conditions)
+    compatible = compatible_by_condition_id[reference.condition_id]
+    return reference, tuple(rng.choices(compatible, k=batch_size))
+
+
 def _condition_manifest(geometry: GeometryConfig) -> dict[str, Any]:
     grouped = training_conditions_by_rule(geometry)
+    compatibility = _duration_compatibility_index(geometry, grouped)
     return {
-        "sampler": "uniform_rule_then_uniform_condition_speed_delay",
+        "sampler": "uniform_rule_speed_delay_reference_condition_then_compatible_batch",
         "active_rules_in_sampling_order": list(ACTIVE_RULES),
         "condition_count_by_rule": {rule: len(grouped[rule]) for rule in ACTIVE_RULES},
         "speed_names": list(SPEED_NAMES),
         "delay_steps": list(geometry.delay_steps),
+        "batch_condition_sampling": {
+            "reference_condition": "uniform_within_selected_rule",
+            "compatibility": "same_rule_speed_and_movement_intervals",
+            "sampling_within_compatible_group": "with_replacement",
+            "batch_size": 32,
+            "direction_sampling": False,
+            "stroke_spatial_cue": [0.0, 0.0],
+            "compatible_group_size_range_by_rule_and_speed": {
+                rule: {
+                    speed_name: [
+                        min(len(group) for group in compatibility[rule][speed_name].values()),
+                        max(len(group) for group in compatibility[rule][speed_name].values()),
+                    ]
+                    for speed_name in SPEED_NAMES
+                }
+                for rule in ACTIVE_RULES
+            },
+        },
         "stroke_jitter": {
             "distribution": "uniform_per_axis",
             "fraction_of_global_character_span": geometry.stroke_jitter_fraction,
@@ -344,20 +406,25 @@ def train_hanzi_shared_model(config: dict[str, Any]) -> dict[str, Any]:
         action_frame_stacking=0,
     )
     conditions_by_rule = training_conditions_by_rule(geometry)
+    compatibility = _duration_compatibility_index(geometry, conditions_by_rule)
     losses: list[float] = []
     best_validation = np.inf
     last_validation: float | None = None
 
     for update in range(hp["epochs"]):
         rule = random.choice(ACTIVE_RULES)
-        condition = random.choice(conditions_by_rule[rule])
         speed_name = random.choice(SPEED_NAMES)
         delay_steps = random.choice(geometry.delay_steps)
+        reference_condition, batch_conditions = _sample_compatible_condition_batch(
+            conditions_by_rule[rule],
+            compatibility[rule][speed_name],
+            hp["batch_size"],
+        )
         result = _rollout(
             policy,
             env,
             hp,
-            (condition,) * hp["batch_size"],
+            batch_conditions,
             speed_name,
             delay_steps,
             network_noise=True,
@@ -386,7 +453,16 @@ def train_hanzi_shared_model(config: dict[str, Any]) -> dict[str, Any]:
                 "update": update,
                 "mean_total_loss": float(np.mean(losses[-interval:])),
                 "sampled_rule": rule,
-                "sampled_condition": condition.condition_id,
+                "reference_condition": reference_condition.condition_id,
+                "batch_condition_ids": [
+                    condition.condition_id for condition in batch_conditions
+                ],
+                "batch_unique_condition_count": len(
+                    {condition.condition_id for condition in batch_conditions}
+                ),
+                "compatible_condition_count": len(
+                    compatibility[rule][speed_name][reference_condition.condition_id]
+                ),
                 "sampled_speed": speed_name,
                 "sampled_delay_steps": delay_steps,
                 **detached_position_metrics(position_metrics),
