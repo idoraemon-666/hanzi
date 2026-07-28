@@ -1,0 +1,18 @@
+{
+  "project": "hanzi_stroke_temporal_composition",
+  "run_kind": "character_validation",
+  "seed": 42,
+  "device": "cpu",
+  "geometry_config": "configurations/hanzi_stroke_temporal_composition_geometry.json",
+  "source_checkpoint": "runs/hanzi_stroke_temporal_composition/train/dev42/best_checkpoint.pt",
+  "character_validation": {
+    "characters": ["mu", "jiang", "ke"],
+    "speed": "medium",
+    "prepare_steps": 25,
+    "final_hold_steps": 25,
+    "freeze_network": true,
+    "writing_mask_enabled": true,
+    "network_noise": false
+  },
+  "output_directory": "runs/hanzi_stroke_temporal_composition/character_validation/dev42"
+}

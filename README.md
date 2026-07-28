@@ -1,49 +1,31 @@
-# digit_writing_original_protocol2
+# hanzi_stroke_temporal_composition
 
-本分支是最终数字轨迹与阶段归一化位置损失协议的独立项目。它复用原仓库的 MotorNet、mRNNTorch、28 维输入、基础训练循环和冻结迁移框架，但不复用上一项目的 checkpoint、optimizer state 或训练结果。
+这是从正式项目 2 提交 `f760672` 分出的独立汉字基本笔画时序组合项目。原数字代码保留，
+但本项目不读取数字 checkpoint、optimizer state 或训练结果。
+
+核心设计：一个共享 RNN–MotorNet 模型学习 8 种孤立书写笔画和 1 种通用 move；冻结后通过
+随时间切换 rule、go cue 和 move goal cue 连续写出 `mu`、`jiang`、`ke`。完整汉字不进入训练。
 
 权威文件：
 
-- `PROJECT_PROTOCOL.md`：项目 2 科学与实施规范；
-- `digit_writing/digit_geometry_final.py`：0–9 几何、尺度、速度和分段采样唯一来源；
-- `CODEX_MINIMAL_FINAL_DIGIT_MODIFICATION.md`：本轮决定的原始实施指令。
+- `PROJECT_PROTOCOL.md`：科学和实施合同；
+- `hanzi_writing/hanzi_geometry_final.py`：几何、尺度、采样、move 和整字 schedule 的唯一来源；
+- `CODEX_MINIMAL_FINAL_HANZI_STROKE_COMPOSITION.md`：本轮实施依据。
 
-核心变化：
-
-- 使用最终 A/B 共享曲线、独立数字 8、4:3 与 5:4 椭圆几何；
-- 每个 segment 按线性弧长和物理速度独立确定 interval；
-- movement 同时监督首末轨迹点，hold 从下一步开始；
-- 主位置项采用 `0.1/0.1/0.6/0.2` 四阶段归一化 L1；
-- 组合固定为 `{0,4,6,9,8}` 的五次 leave-one-out；
-- full10 与 heldout5 仍完全独立。
-
-主要实现：
-
-- `digit_writing/geometry.py`：最终几何到环境接口的缓存薄适配；
-- `digit_writing/phase_normalized_loss.py`：阶段损失和诊断指标；
-- `digit_writing/final_protocol_audit.py`：工作空间与高风险短闭环审计；
-- `envs.py`：28 维环境与最终 movement/hold 时序；
-- `train.py`：基础训练、验证和数字 5 迁移；
-- `digit_writing/experiments.py`：固定五任务组合入口。
-
-服务器继续使用仓库目录：
+主要入口：
 
 ```text
-/root/autodl-tmp/digit_writing_original_protocol_4b8b1db
+configurations/hanzi_stroke_temporal_composition_geometry.json
+configurations/hanzi_stroke_temporal_composition_train_dev42.json
+configurations/hanzi_stroke_temporal_composition_validate_characters.json
+
+server/run_hanzi_stroke_temporal_composition_audit.sh
+server/run_hanzi_stroke_temporal_composition_train_dev42.sh
+server/run_hanzi_stroke_temporal_composition_validate_characters.sh
 ```
 
-项目 2 的运行输出固定进入：
+环境和所有项目测试只在服务器执行。审计会使用独立 CPU 环境，并检查几何、时序、28-D
+输入、sampler、81 组 checkpoint 网格、MotorNet 工作空间、短闭环和冻结整字 rollout。
 
-```text
-runs/digit_writing_original_protocol2/
-```
-
-训练前审计入口：
-
-```bash
-bash server/run_digit_writing_original_protocol2_audit.sh \
-  /root/autodl-tmp/digit_writing_original_protocol_4b8b1db \
-  /root/autodl-tmp/digit-writing-original-protocol2-audit-run1
-```
-
-当前停止线：尚未启动项目 2 的 75,000 updates 正式训练。每个正式 exact run label 仍需用户单独授权。
+当前停止线：尚未启动 75,000 updates 正式训练；正式训练必须在服务器审计通过并经用户
+明确授权后单独启动。

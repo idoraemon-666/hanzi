@@ -16,13 +16,21 @@ def config_parser():
 def load_protocol_config(path):
     with open(path, "r", encoding="utf-8") as handle:
         config = json.load(handle)
-    if config.get("protocol") != "digit_writing_original_protocol2":
-        raise ValueError("not a digit_writing_original_protocol2 configuration")
+    protocol = config.get("protocol", config.get("project"))
+    if protocol not in {
+        "digit_writing_original_protocol2",
+        "hanzi_stroke_temporal_composition",
+    }:
+        raise ValueError("unknown project protocol configuration")
     return config
 
 
 def run_protocol_config(path):
     config = load_protocol_config(path)
+    if config.get("project") == "hanzi_stroke_temporal_composition":
+        from hanzi_writing.training import run_config
+
+        return run_config(config)
     run_kind = config["run_kind"]
     if run_kind == "base_training":
         from train import train_digit_base_model

@@ -1,0 +1,383 @@
+"""Configured training and validation conditions around the geometry authority."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+import json
+import math
+from pathlib import Path
+from typing import Mapping
+
+import numpy as np
+
+from hanzi_writing import hanzi_geometry_final as authority
+
+
+PROJECT = "hanzi_stroke_temporal_composition"
+GEOMETRY_SOURCE = "hanzi_writing/hanzi_geometry_final.py"
+ACTIVE_RULES = tuple(authority.RULE_INDEX)
+SPEED_NAMES = tuple(authority.TRAIN_SPEED_MPS)
+
+
+@dataclass(frozen=True)
+class GeometryConfig:
+    project: str
+    geometry_source: str
+    target_long_medium_steps: int
+    dt_seconds: float
+    stable_steps: int
+    delay_steps: tuple[int, ...]
+    hold_steps: int
+    prepare_steps: int
+    stroke_jitter_fraction: float
+    stroke_jitter_copies: int
+    stroke_jitter_seed: int
+    validation_delay_steps: int
+    validation_seed: int
+    validation_network_noise: bool
+
+
+@dataclass(frozen=True)
+class StrokeCondition:
+    condition_id: str
+    rule: str
+    primitive_id: str
+    character: str
+    stroke_index: int
+    variant: str
+    start_xy_m: np.ndarray
+    relative_points_m: np.ndarray
+
+
+@dataclass(frozen=True)
+class MoveCondition:
+    condition_id: str
+    character: str
+    transition_index: int
+    variant: str
+    start_xy_m: np.ndarray
+    goal_xy_m: np.ndarray
+
+
+@dataclass(frozen=True)
+class ComponentTrajectory:
+    rule: str
+    condition_id: str
+    speed_name: str
+    speed_mps: float
+    speed_scalar: float
+    movement_intervals: int
+    points_m: np.ndarray
+    spatial_cue: np.ndarray
+
+
+def _require_keys(value: Mapping[str, object], expected: set[str], label: str) -> None:
+    actual = set(value)
+    if actual != expected:
+        raise ValueError(
+            f"{label} keys differ; missing={sorted(expected - actual)}, "
+            f"extra={sorted(actual - expected)}"
+        )
+
+
+def load_geometry_config(path: str | Path) -> GeometryConfig:
+    with Path(path).open("r", encoding="utf-8") as handle:
+        raw = json.load(handle)
+    _require_keys(
+        raw,
+        {
+            "project",
+            "geometry_source",
+            "rule_count_active",
+            "rule_dim_total",
+            "unused_rule_index",
+            "target_long_medium_steps",
+            "train_speed_mps",
+            "train_speed_scalar",
+            "timing",
+            "stroke_start_sampling",
+            "checkpoint_validation",
+        },
+        "geometry configuration",
+    )
+    timing = raw["timing"]
+    sampling = raw["stroke_start_sampling"]
+    validation = raw["checkpoint_validation"]
+    if not all(isinstance(value, dict) for value in (timing, sampling, validation)):
+        raise ValueError("timing, stroke_start_sampling, and checkpoint_validation must be objects")
+    _require_keys(
+        timing,
+        {"dt_seconds", "stable_steps", "delay_steps", "hold_steps", "prepare_steps"},
+        "timing",
+    )
+    _require_keys(
+        sampling,
+        {
+            "coordinate_frame",
+            "base_starts",
+            "cross_each_primitive_with_all_rule_starts",
+            "jitter",
+        },
+        "stroke_start_sampling",
+    )
+    jitter = sampling["jitter"]
+    if not isinstance(jitter, dict):
+        raise ValueError("stroke_start_sampling.jitter must be an object")
+    _require_keys(
+        jitter,
+        {
+            "distribution",
+            "fraction_of_global_character_span",
+            "copies_per_base_start",
+            "seed",
+        },
+        "stroke_start_sampling.jitter",
+    )
+    _require_keys(
+        validation,
+        {
+            "strokes",
+            "stroke_starts",
+            "moves",
+            "speeds",
+            "delay_steps",
+            "include_jitter",
+            "include_complete_characters",
+            "validation_seed",
+            "network_noise",
+            "aggregation",
+        },
+        "checkpoint_validation",
+    )
+
+    config = GeometryConfig(
+        project=str(raw["project"]),
+        geometry_source=str(raw["geometry_source"]),
+        target_long_medium_steps=int(raw["target_long_medium_steps"]),
+        dt_seconds=float(timing["dt_seconds"]),
+        stable_steps=int(timing["stable_steps"]),
+        delay_steps=tuple(int(value) for value in timing["delay_steps"]),
+        hold_steps=int(timing["hold_steps"]),
+        prepare_steps=int(timing["prepare_steps"]),
+        stroke_jitter_fraction=float(jitter["fraction_of_global_character_span"]),
+        stroke_jitter_copies=int(jitter["copies_per_base_start"]),
+        stroke_jitter_seed=int(jitter["seed"]),
+        validation_delay_steps=int(validation["delay_steps"]),
+        validation_seed=int(validation["validation_seed"]),
+        validation_network_noise=bool(validation["network_noise"]),
+    )
+    if config.project != PROJECT or config.geometry_source != GEOMETRY_SOURCE:
+        raise ValueError("configuration names the wrong project or geometry authority")
+    if (
+        raw["rule_count_active"] != 9
+        or raw["rule_dim_total"] != authority.RULE_DIM
+        or raw["unused_rule_index"] != authority.UNUSED_RULE_INDEX
+    ):
+        raise ValueError("rule dimensions differ from the authority")
+    if raw["train_speed_mps"] != dict(authority.TRAIN_SPEED_MPS):
+        raise ValueError("train_speed_mps differs from the authority")
+    if raw["train_speed_scalar"] != dict(authority.TRAIN_SPEED_SCALAR):
+        raise ValueError("train_speed_scalar differs from the authority")
+    if config.target_long_medium_steps != authority.TARGET_LONG_MEDIUM_STEPS:
+        raise ValueError("target_long_medium_steps differs from the authority")
+    if not math.isclose(config.dt_seconds, authority.DT_S, rel_tol=0.0, abs_tol=1e-15):
+        raise ValueError("dt_seconds differs from the authority")
+    if (
+        config.stable_steps != authority.STABLE_STEPS
+        or config.hold_steps != authority.FINAL_HOLD_STEPS
+        or config.prepare_steps != authority.PREPARE_STEPS
+        or config.delay_steps != (25, 50, 75)
+    ):
+        raise ValueError("timing differs from the accepted protocol")
+    if sampling["coordinate_frame"] != "character_local_then_add_motornet_anchor":
+        raise ValueError("unsupported stroke-start coordinate frame")
+    if sampling["base_starts"] != "motornet_center_plus_all_unique_actual_rule_starts":
+        raise ValueError("unsupported stroke base-start set")
+    if sampling["cross_each_primitive_with_all_rule_starts"] is not True:
+        raise ValueError("each primitive must cross all starts for its rule")
+    if jitter["distribution"] != "uniform_per_axis":
+        raise ValueError("stroke jitter must be uniform per axis")
+    if (
+        config.stroke_jitter_fraction != 0.03
+        or config.stroke_jitter_copies != 4
+        or config.stroke_jitter_seed != 42
+    ):
+        raise ValueError("stroke jitter differs from the accepted protocol")
+    if (
+        authority.MOVE_JITTER_FRACTION != 0.03
+        or authority.MOVE_JITTER_COPIES != 4
+        or authority.RANDOM_SEED != 42
+    ):
+        raise ValueError("move jitter differs from the geometry authority")
+    if validation != {
+        "strokes": "all_15_primitives",
+        "stroke_starts": "center_and_all_exact_rule_starts",
+        "moves": "all_12_exact_transitions",
+        "speeds": ["fast", "medium", "slow"],
+        "delay_steps": 50,
+        "include_jitter": False,
+        "include_complete_characters": False,
+        "validation_seed": 1042,
+        "network_noise": True,
+        "aggregation": "equal_mean_over_9_rules",
+    }:
+        raise ValueError("checkpoint validation grid differs from the accepted protocol")
+    return config
+
+
+def _characters(config: GeometryConfig) -> dict[str, authority.Character]:
+    characters, _ = authority.physical_characters(config.target_long_medium_steps)
+    return characters
+
+
+def _unique_points(points: list[np.ndarray]) -> list[np.ndarray]:
+    output: list[np.ndarray] = []
+    for point in points:
+        array = np.asarray(point, dtype=np.float64)
+        if not any(np.allclose(array, existing, rtol=0.0, atol=1e-12) for existing in output):
+            output.append(array.copy())
+    return output
+
+
+def exact_rule_starts(config: GeometryConfig) -> dict[str, tuple[np.ndarray, ...]]:
+    occurrences = authority.primitive_occurrences(_characters(config))
+    starts: dict[str, list[np.ndarray]] = {rule: [np.zeros(2)] for rule in ACTIVE_RULES[:-1]}
+    for occurrence in occurrences:
+        starts[str(occurrence["rule"])].append(
+            np.asarray(occurrence["start_xy_m"], dtype=np.float64)
+        )
+    return {rule: tuple(_unique_points(values)) for rule, values in starts.items()}
+
+
+def _global_character_span(config: GeometryConfig) -> np.ndarray:
+    characters = _characters(config)
+    points = np.concatenate(
+        [stroke.points for character in characters.values() for stroke in character.strokes]
+    )
+    return np.ptp(points, axis=0)
+
+
+def stroke_conditions(
+    config: GeometryConfig, *, include_jitter: bool
+) -> tuple[StrokeCondition, ...]:
+    occurrences = authority.primitive_occurrences(_characters(config))
+    starts = exact_rule_starts(config)
+    rng = np.random.default_rng(config.stroke_jitter_seed)
+    jitter_scale = _global_character_span(config) * config.stroke_jitter_fraction
+    output: list[StrokeCondition] = []
+    for occurrence_index, occurrence in enumerate(occurrences):
+        rule = str(occurrence["rule"])
+        primitive_id = f"primitive_{occurrence_index:02d}_{rule}"
+        for start_index, exact_start in enumerate(starts[rule]):
+            placements = [("exact", exact_start)]
+            if include_jitter:
+                placements.extend(
+                    (
+                        f"jitter_{copy_index}",
+                        exact_start + rng.uniform(-jitter_scale, jitter_scale),
+                    )
+                    for copy_index in range(config.stroke_jitter_copies)
+                )
+            for variant, start in placements:
+                output.append(
+                    StrokeCondition(
+                        condition_id=(
+                            f"{primitive_id}_start_{start_index:02d}_{variant}"
+                        ),
+                        rule=rule,
+                        primitive_id=primitive_id,
+                        character=str(occurrence["character"]),
+                        stroke_index=int(occurrence["stroke_index"]),
+                        variant=variant,
+                        start_xy_m=np.asarray(start, dtype=np.float64),
+                        relative_points_m=np.asarray(
+                            occurrence["relative_points_m"], dtype=np.float64
+                        ),
+                    )
+                )
+    return tuple(output)
+
+
+def move_conditions(
+    config: GeometryConfig, *, include_jitter: bool
+) -> tuple[MoveCondition, ...]:
+    records = authority.move_training_conditions(_characters(config))
+    output = []
+    for record in records:
+        if not include_jitter and record["variant"] != "exact":
+            continue
+        output.append(
+            MoveCondition(
+                condition_id=(
+                    f"move_{record['character']}_{int(record['transition_index']):02d}_"
+                    f"{record['variant']}"
+                ),
+                character=str(record["character"]),
+                transition_index=int(record["transition_index"]),
+                variant=str(record["variant"]),
+                start_xy_m=np.asarray(record["start_xy_m"], dtype=np.float64),
+                goal_xy_m=np.asarray(record["goal_xy_m"], dtype=np.float64),
+            )
+        )
+    return tuple(output)
+
+
+def training_conditions_by_rule(
+    config: GeometryConfig,
+) -> dict[str, tuple[StrokeCondition | MoveCondition, ...]]:
+    grouped: dict[str, list[StrokeCondition | MoveCondition]] = {
+        rule: [] for rule in ACTIVE_RULES
+    }
+    for condition in stroke_conditions(config, include_jitter=True):
+        grouped[condition.rule].append(condition)
+    grouped["move"].extend(move_conditions(config, include_jitter=True))
+    if any(not values for values in grouped.values()):
+        raise RuntimeError("every active rule must have training conditions")
+    return {rule: tuple(values) for rule, values in grouped.items()}
+
+
+def checkpoint_stroke_groups(
+    config: GeometryConfig,
+) -> tuple[tuple[StrokeCondition, ...], ...]:
+    grouped: dict[str, list[StrokeCondition]] = {}
+    for condition in stroke_conditions(config, include_jitter=False):
+        grouped.setdefault(condition.primitive_id, []).append(condition)
+    return tuple(tuple(grouped[key]) for key in sorted(grouped))
+
+
+def build_component_trajectory(
+    condition: StrokeCondition | MoveCondition,
+    speed_name: str,
+    cue_normalizer_m: float,
+) -> ComponentTrajectory:
+    if speed_name not in authority.TRAIN_SPEED_MPS:
+        raise KeyError(f"unknown speed: {speed_name}")
+    speed = authority.TRAIN_SPEED_MPS[speed_name]
+    if isinstance(condition, StrokeCondition):
+        dense = condition.relative_points_m + condition.start_xy_m
+        rule = condition.rule
+        cue = np.zeros(2, dtype=np.float64)
+    else:
+        dense = authority.straight_line(condition.start_xy_m, condition.goal_xy_m)
+        rule = "move"
+        cue = condition.goal_xy_m / cue_normalizer_m
+    intervals = authority.intervals_for_length(authority.arc_length(dense), speed)
+    points = authority.resample_by_arclength(dense, intervals)
+    return ComponentTrajectory(
+        rule=rule,
+        condition_id=condition.condition_id,
+        speed_name=speed_name,
+        speed_mps=speed,
+        speed_scalar=authority.TRAIN_SPEED_SCALAR[speed_name],
+        movement_intervals=intervals,
+        points_m=points,
+        spatial_cue=cue,
+    )
+
+
+def cue_scale(config: GeometryConfig) -> float:
+    return authority.cue_scale_m(_characters(config))
+
+
+def characters(config: GeometryConfig) -> dict[str, authority.Character]:
+    return _characters(config)

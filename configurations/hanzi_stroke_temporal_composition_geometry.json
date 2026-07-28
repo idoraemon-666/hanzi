@@ -1,0 +1,48 @@
+{
+  "project": "hanzi_stroke_temporal_composition",
+  "geometry_source": "hanzi_writing/hanzi_geometry_final.py",
+  "rule_count_active": 9,
+  "rule_dim_total": 10,
+  "unused_rule_index": 9,
+  "target_long_medium_steps": 150,
+  "train_speed_mps": {
+    "fast": 0.5,
+    "medium": 0.25,
+    "slow": 0.16666666666666666
+  },
+  "train_speed_scalar": {
+    "fast": 0.6666666666666666,
+    "medium": 0.3333333333333333,
+    "slow": 0.0
+  },
+  "timing": {
+    "dt_seconds": 0.01,
+    "stable_steps": 25,
+    "delay_steps": [25, 50, 75],
+    "hold_steps": 25,
+    "prepare_steps": 25
+  },
+  "stroke_start_sampling": {
+    "coordinate_frame": "character_local_then_add_motornet_anchor",
+    "base_starts": "motornet_center_plus_all_unique_actual_rule_starts",
+    "cross_each_primitive_with_all_rule_starts": true,
+    "jitter": {
+      "distribution": "uniform_per_axis",
+      "fraction_of_global_character_span": 0.03,
+      "copies_per_base_start": 4,
+      "seed": 42
+    }
+  },
+  "checkpoint_validation": {
+    "strokes": "all_15_primitives",
+    "stroke_starts": "center_and_all_exact_rule_starts",
+    "moves": "all_12_exact_transitions",
+    "speeds": ["fast", "medium", "slow"],
+    "delay_steps": 50,
+    "include_jitter": false,
+    "include_complete_characters": false,
+    "validation_seed": 1042,
+    "network_noise": true,
+    "aggregation": "equal_mean_over_9_rules"
+  }
+}
