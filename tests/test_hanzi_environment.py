@@ -88,8 +88,11 @@ class HanziEnvironmentTests(unittest.TestCase):
         )
         stable_end = env.epoch_bounds["stable"][1]
         movement_end = env.epoch_bounds["movement"][1]
-        expected = condition.goal_xy_m / cue_scale(self.config)
-        np.testing.assert_allclose(env.vis_inp[0, stable_end:movement_end].cpu(), expected, atol=1e-7)
+        actual = env.vis_inp[0, stable_end:movement_end].cpu()
+        expected = np.broadcast_to(
+            condition.goal_xy_m / cue_scale(self.config), tuple(actual.shape)
+        )
+        np.testing.assert_allclose(actual, expected, atol=1e-7)
         np.testing.assert_allclose(env.vis_inp[0, :stable_end].cpu(), 0.0)
         np.testing.assert_allclose(env.vis_inp[0, movement_end:].cpu(), 0.0)
         self.assertEqual(int(torch.argmax(env.rule_input[0, 0]).item()), authority.RULE_INDEX["move"])
