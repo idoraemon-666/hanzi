@@ -237,9 +237,15 @@ class FixedDurationContractTests(unittest.TestCase):
         optimizer = torch.optim.Adam(policy.parameters(), lr=0.001)
         policy(torch.ones(1, 2)).sum().backward()
 
-        class GeneratorHolder:
+        class EffectorHolder(torch.nn.Module):
             def __init__(self):
+                super().__init__()
                 self._np_random = np.random.default_rng(42)
+
+        class GeneratorHolder(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.effector = EffectorHolder()
 
         validation_value = {
             "aggregate": {"phase_normalized_position_l1": 1.0},
@@ -272,7 +278,7 @@ class FixedDurationContractTests(unittest.TestCase):
         self.assertTrue(all(value for value in first["read_only_checks"].values() if isinstance(value, bool)))
         self.assertEqual(
             first["read_only_checks"]["captured_environment_generator_paths"],
-            ["GeneratorHolder._np_random"],
+            ["GeneratorHolder.effector._np_random"],
         )
 
 

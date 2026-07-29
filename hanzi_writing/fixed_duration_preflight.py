@@ -454,6 +454,14 @@ def run_validation_benchmark(
         raise RuntimeError("first read-only validation state check failed")
     if not all(value for value in checks_second.values() if isinstance(value, bool)):
         raise RuntimeError("second read-only validation state check failed")
+    expected_generator_path = "HanziComponentEnv.effector._np_random"
+    for index, call_checks in enumerate((checks, checks_second), start=1):
+        if expected_generator_path not in call_checks[
+            "captured_environment_generator_paths"
+        ]:
+            raise RuntimeError(
+                f"validation call {index} did not capture {expected_generator_path}"
+            )
     result = {
         "passed": True,
         "rollout_group_count": group_count,

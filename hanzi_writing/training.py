@@ -758,7 +758,11 @@ def _environment_generator_states(root: Any) -> list[tuple[Any, str, Any, str]]:
             return
         if depth >= 4 or not hasattr(value, "__dict__"):
             return
-        for name, child in vars(value).items():
+        children = dict(vars(value))
+        if isinstance(value, torch.nn.Module):
+            for name, child in value.named_children():
+                children.setdefault(name, child)
+        for name, child in children.items():
             if isinstance(
                 child,
                 (torch.Generator, np.random.Generator, np.random.RandomState, random.Random),
