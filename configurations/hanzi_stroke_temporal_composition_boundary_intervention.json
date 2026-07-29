@@ -1,0 +1,35 @@
+{
+  "project": "hanzi_stroke_temporal_composition",
+  "run_kind": "boundary_state_block_intervention",
+  "variant": "shared9_dev42",
+  "device": "cpu",
+  "seed": 1042,
+  "geometry_config": "configurations/hanzi_stroke_temporal_composition_geometry.json",
+  "checkpoint": "runs/hanzi_stroke_temporal_composition/train/dev42/best_checkpoint.pt",
+  "checkpoint_sha256": "76a7c2ca021a69ea99d68c143773307000890d72f7c7d6233614c6a5fab9ca39",
+  "checkpoint_kind": "best",
+  "speed": "medium",
+  "characters": ["mu", "jiang", "ke"],
+  "prepare_steps": 25,
+  "network_noise": false,
+  "deterministic_observation": true,
+  "environment_noise": false,
+  "conditions": [
+    "C0_continuous",
+    "C1_plant_sensory_clean",
+    "C2_neural_clean",
+    "C3_joint_clean",
+    "P1_plant_sensory_clean_before_prepare"
+  ],
+  "isolated_control": {
+    "path": "runs/hanzi_stroke_temporal_composition/fit_diagnostic/dev42_best_final/component_metrics.csv",
+    "sha256": "d4e76993600e906df6bb25a6e2a67d0065cfe18874018841d6c9b453633bcecc",
+    "checkpoint": "best",
+    "speed": "medium",
+    "variant": "exact"
+  },
+  "corner_window_radius_samples": 3,
+  "technical_tolerance": 1e-7,
+  "behavioral_pass_fail": "not_defined",
+  "output_directory": "runs/hanzi_stroke_temporal_composition/boundary_intervention/dev42_best_medium"
+}
