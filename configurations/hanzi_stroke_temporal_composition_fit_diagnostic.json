@@ -1,0 +1,24 @@
+{
+  "project": "hanzi_stroke_temporal_composition",
+  "run_kind": "fit_diagnostic",
+  "variant": "shared9_dev42",
+  "device": "cpu",
+  "seed": 1042,
+  "geometry_config": "configurations/hanzi_stroke_temporal_composition_geometry.json",
+  "checkpoints": {
+    "best": "runs/hanzi_stroke_temporal_composition/train/dev42/best_checkpoint.pt",
+    "final": "runs/hanzi_stroke_temporal_composition/train/dev42/final_continuation_checkpoint.pt"
+  },
+  "speeds": ["fast", "medium", "slow"],
+  "delay_steps": 50,
+  "network_noise": false,
+  "deterministic_observation": true,
+  "include_jitter": false,
+  "diagnostic_contract": {
+    "conditions": "all_15_primitives_all_exact_rule_starts_and_all_12_exact_moves",
+    "aggregation": "per_condition_and_equal_mean_over_9_rules",
+    "behavioral_pass_fail": "not_defined",
+    "path_completion_metric": "not_defined"
+  },
+  "output_directory": "runs/hanzi_stroke_temporal_composition/fit_diagnostic/dev42_best_final"
+}
