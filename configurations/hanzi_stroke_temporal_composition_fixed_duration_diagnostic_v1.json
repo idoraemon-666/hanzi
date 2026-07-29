@@ -1,0 +1,32 @@
+{
+  "project": "hanzi_stroke_temporal_composition",
+  "run_kind": "fixed_duration_fit_diagnostic",
+  "variant": "fixed_duration_9task_pilot_v1",
+  "device": "cpu",
+  "seed": 1042,
+  "pilot_config": "configurations/hanzi_stroke_temporal_composition_fixed_duration_pilot_v1.json",
+  "geometry_config": "configurations/hanzi_stroke_temporal_composition_fixed_duration_geometry.json",
+  "frozen_preflight_condition_manifest": "runs/hanzi_stroke_temporal_composition/fixed_duration_preflight/dev42_711c4f1/fixed_duration_condition_manifest.csv",
+  "frozen_preflight_condition_manifest_sha256": "19928754f9ce75e5f30917b173eeaf1791a9c13c95607e0fa133795879f7d211",
+  "checkpoints": {
+    "best": "runs/hanzi_stroke_temporal_composition/fixed_duration_pilot/dev42/best_checkpoint.pt",
+    "final": "runs/hanzi_stroke_temporal_composition/fixed_duration_pilot/dev42/final_continuation_checkpoint.pt"
+  },
+  "duration_conditions": ["fast", "medium", "slow"],
+  "delay_steps": 50,
+  "network_noise": false,
+  "deterministic_observation": true,
+  "include_jitter": false,
+  "diagnostic_contract": {
+    "conditions": "46_exact_stroke_placements_and_12_exact_moves",
+    "aggregation": "atomic_then_primitive_then_rule_then_equal_9_rule_mean",
+    "behavioral_pass_fail": "not_defined",
+    "causal_effect": "not_claimed",
+    "complete_character_rollout": false,
+    "N_corner": 4,
+    "metric_rows": 348,
+    "trajectory_rows": 35268,
+    "plots": 18
+  },
+  "output_directory": "runs/hanzi_stroke_temporal_composition/fixed_duration_pilot_diagnostic/dev42_best_final"
+}
