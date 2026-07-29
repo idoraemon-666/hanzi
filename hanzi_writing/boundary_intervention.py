@@ -1376,9 +1376,33 @@ def _boundary_corner_world(
     stroke = characters(geometry)[boundary["character"]].strokes[
         boundary["next_stroke_index"]
     ]
-    if len(stroke.points) < 3:
-        raise RuntimeError("hengzhe authority does not contain an interior corner")
-    return np.asarray(stroke.points[1], dtype=np.float64) + np.asarray(anchor_m)
+    return _single_dense_polyline_corner(stroke.points) + np.asarray(anchor_m)
+
+
+def _single_dense_polyline_corner(points: np.ndarray) -> np.ndarray:
+    points = np.asarray(points, dtype=np.float64)
+    if points.ndim != 2 or points.shape[1] != 2 or len(points) < 4:
+        raise RuntimeError("corner authority must be a dense [time, 2] polyline")
+    differences = np.diff(points, axis=0)
+    lengths = np.linalg.norm(differences, axis=1)
+    if np.any(lengths <= 0.0):
+        raise RuntimeError("corner authority contains a zero-length interval")
+    directions = differences / lengths[:, None]
+    cosines = np.sum(directions[:-1] * directions[1:], axis=1)
+    turn_angles = np.arccos(np.clip(cosines, -1.0, 1.0))
+    transition_index = int(np.argmax(turn_angles))
+    maximum_turn = float(turn_angles[transition_index])
+    if maximum_turn <= math.radians(1.0):
+        raise RuntimeError("corner authority has no resolvable direction change")
+    equally_large = np.flatnonzero(
+        np.isclose(turn_angles, maximum_turn, rtol=0.0, atol=1e-10)
+    )
+    if len(equally_large) != 1:
+        raise RuntimeError("corner authority does not have a unique direction change")
+    corner_index = transition_index + 1
+    if corner_index <= 0 or corner_index >= len(points) - 1:
+        raise RuntimeError("corner authority direction change lies at an endpoint")
+    return points[corner_index].copy()
 
 
 def _condition_metrics(

@@ -13,6 +13,7 @@ from hanzi_writing.boundary_intervention import (
     CONDITIONS,
     _new_character_env,
     _sample,
+    _single_dense_polyline_corner,
     compose_observation,
     enumerate_boundaries,
     finalize_trace,
@@ -167,6 +168,14 @@ class BoundaryMetricTests(unittest.TestCase):
         self.assertEqual(metrics["corner_min_distance_m"], 0.0)
         self.assertEqual(metrics["corner_actual_turn_angle_deg"], 90.0)
         self.assertEqual(metrics["corner_turn_angle_difference_deg"], 0.0)
+
+    def test_dense_polyline_corner_is_direction_change_not_second_sample(self):
+        first = np.column_stack((np.linspace(0.0, 4.0, 81), np.zeros(81)))
+        second = np.column_stack((np.full(81, 4.0), np.linspace(0.0, -3.0, 81)))
+        dense = np.concatenate((first, second[1:]), axis=0)
+        corner = _single_dense_polyline_corner(dense)
+        np.testing.assert_array_equal(corner, np.asarray([4.0, 0.0]))
+        self.assertFalse(np.array_equal(corner, dense[1]))
 
 
 if __name__ == "__main__":
