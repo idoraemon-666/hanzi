@@ -486,8 +486,8 @@ def _sample(
         "h": h[0].detach().cpu().numpy().copy(),
         "action": action,
         "plant_sensory_sha256": plant_sensory_digest(plant),
-        "plant_sensory_field_sha256": np.asarray(
-            [field["sha256"] for field in field_manifest], dtype=np.str_
+        "plant_sensory_field_manifest_json": json.dumps(
+            field_manifest, sort_keys=True, separators=(",", ":")
         ),
     }
 
@@ -601,8 +601,9 @@ def finalize_trace(
         "plant_sensory_sha256": np.asarray(
             [sample["plant_sensory_sha256"] for sample in samples], dtype=np.str_
         ),
-        "plant_sensory_field_sha256": np.stack(
-            [sample["plant_sensory_field_sha256"] for sample in samples]
+        "plant_sensory_field_manifest_json": np.asarray(
+            [sample["plant_sensory_field_manifest_json"] for sample in samples],
+            dtype=np.str_,
         ),
     }
     speed = np.empty(len(samples), dtype=np.float64)
@@ -771,7 +772,7 @@ def assert_traces_match(
         "h",
         "action",
         "plant_sensory_sha256",
-        "plant_sensory_field_sha256",
+        "plant_sensory_field_manifest_json",
     )
     maximum = 0.0
     for field in fields:

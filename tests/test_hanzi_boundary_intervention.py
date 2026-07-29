@@ -12,8 +12,10 @@ import torch
 from hanzi_writing.boundary_intervention import (
     CONDITIONS,
     _new_character_env,
+    _sample,
     compose_observation,
     enumerate_boundaries,
+    finalize_trace,
     hengzhe_metrics,
     load_boundary_intervention_config,
     movement_metrics,
@@ -98,6 +100,21 @@ class PlantSensoryRestoreTests(unittest.TestCase):
         self.assertEqual(
             plant_sensory_digest(first_after), plant_sensory_digest(second_after)
         )
+
+    def test_trace_serializes_variable_action_buffer_manifest_without_object_arrays(self):
+        env, _ = _new_character_env(GEOMETRY, "mu", "medium", 1042)
+        x = torch.zeros((1, 4), dtype=torch.float32)
+        h = torch.zeros_like(x)
+        first = _sample(env, 0, x, h, None)
+        action = torch.full((1, env.action_space.shape[0]), 0.25, dtype=torch.float32)
+        env.step(1, action=action)
+        second = _sample(env, 1, x, h, action)
+
+        trace = finalize_trace([first, second], env.geometry_config.dt_seconds, None)
+        manifests = trace["plant_sensory_field_manifest_json"]
+        self.assertEqual(manifests.shape, (2,))
+        self.assertNotEqual(manifests.dtype, object)
+        self.assertNotEqual(len(json.loads(manifests[0])), len(json.loads(manifests[1])))
 
 
 class BoundaryMetricTests(unittest.TestCase):
