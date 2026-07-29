@@ -56,11 +56,11 @@ set +e
   "$PYTHON" -m hanzi_writing.fixed_duration_preflight coverage \
     --config "$COVERAGE_CONFIG" \
     --output-dir "$WORK/coverage"
-  /usr/bin/time -v "$PYTHON" -m hanzi_writing.fixed_duration_preflight smoke \
+  "$PYTHON" -m hanzi_writing.fixed_duration_preflight smoke \
     --config "$SMOKE_CONFIG" \
     --output-dir "$WORK/smoke" \
     --state "$WORK/technical_smoke_state.pt"
-  /usr/bin/time -v "$PYTHON" -m hanzi_writing.fixed_duration_preflight validation \
+  "$PYTHON" -m hanzi_writing.fixed_duration_preflight validation \
     --config "$SMOKE_CONFIG" \
     --state "$WORK/technical_smoke_state.pt" \
     --output-dir "$WORK/validation"
