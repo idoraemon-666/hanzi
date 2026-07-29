@@ -175,7 +175,9 @@ class HanziComponentEnv(_HanziEnvironment):
 
         normalizer = cue_scale(self.geometry_config)
         trajectories = [
-            build_component_trajectory(condition, speed_name, normalizer)
+            build_component_trajectory(
+                condition, speed_name, normalizer, self.geometry_config
+            )
             for condition in conditions
         ]
         self._require_batch_compatible(trajectories)
@@ -190,6 +192,8 @@ class HanziComponentEnv(_HanziEnvironment):
         self.component_trajectories = tuple(trajectories)
         self.delay_time = delay_steps
         self.movement_intervals = trajectories[0].movement_intervals
+        self.base_movement_intervals = trajectories[0].base_movement_intervals
+        self.movement_subphase = trajectories[0].movement_subphase
         self._build_trial_inputs(trajectories, delay_steps)
         return self._initialize_observation_buffers(len(conditions), deterministic=deterministic)
 
@@ -278,6 +282,10 @@ class HanziCharacterEnv(_HanziEnvironment):
             prepare_steps=self.geometry_config.prepare_steps,
             final_hold_steps=self.geometry_config.hold_steps,
             cue_normalizer_m=cue_scale(self.geometry_config),
+            timing_mode=self.geometry_config.timing_mode,
+            movement_intervals=dict(self.geometry_config.movement_intervals),
+            corner_dwell_intervals=self.geometry_config.corner_dwell_intervals,
+            corner_dwell_rules=self.geometry_config.corner_dwell_rules,
         )
         local_target = np.asarray(schedule["target_xy_m"], dtype=np.float64)
         self._reset_effector(local_target[:1])
@@ -305,6 +313,7 @@ class HanziCharacterEnv(_HanziEnvironment):
         )
         self.phase = tuple(schedule["phase"])
         self.segments = tuple(schedule["segments"])
+        self.movement_subphase = tuple(schedule.get("movement_subphase", ()))
         self.character_name = character_name
         self.speed_name = speed_name
         self.max_ep_duration = self.traj.shape[1] - 1

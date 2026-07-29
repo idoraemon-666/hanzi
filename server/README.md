@@ -10,6 +10,10 @@ The active branch is `hanzi_stroke_temporal_composition`. Its server files are:
   75,000-update training;
 - `run_hanzi_stroke_temporal_composition_validate_characters.sh`: separately
   authorized frozen `mu/jiang/ke` validation.
+- `export_hanzi_legacy_timing_reference.py`: read-only old-HEAD timing exporter;
+- `run_hanzi_fixed_duration_preflight.sh`: fixed-duration target audit, deterministic
+  coverage, 100-update technical smoke, and read-only validation benchmark. It
+  stops without starting the 10k pilot or either formal training run.
 
 Use the generated upload package and its short `RUN_AUDIT.sh` command instead of
 manually reconstructing the repository or pasting a long command sequence.

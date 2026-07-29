@@ -17,6 +17,8 @@ PROJECT = "hanzi_stroke_temporal_composition"
 GEOMETRY_SOURCE = "hanzi_writing/hanzi_geometry_final.py"
 ACTIVE_RULES = tuple(authority.RULE_INDEX)
 SPEED_NAMES = tuple(authority.TRAIN_SPEED_MPS)
+LEGACY_TIMING_MODE = "legacy_arc_length_fixed_speed"
+FIXED_DURATION_TIMING_MODE = "fixed_movement_duration"
 
 
 @dataclass(frozen=True)
@@ -35,6 +37,16 @@ class GeometryConfig:
     validation_delay_steps: int
     validation_seed: int
     validation_network_noise: bool
+    timing_mode: str = LEGACY_TIMING_MODE
+    movement_intervals: tuple[tuple[str, int], ...] = ()
+    corner_dwell_intervals: int = 0
+    corner_dwell_rules: tuple[str, ...] = ()
+
+    def intervals_for_speed(self, speed_name: str) -> int:
+        values = dict(self.movement_intervals)
+        if speed_name not in values:
+            raise KeyError(f"fixed-duration intervals are missing speed: {speed_name}")
+        return values[speed_name]
 
 
 @dataclass(frozen=True)
@@ -69,6 +81,18 @@ class ComponentTrajectory:
     movement_intervals: int
     points_m: np.ndarray
     spatial_cue: np.ndarray
+    base_movement_intervals: int
+    target_path_length_m: float
+    base_movement_duration_s: float
+    total_movement_duration_s: float
+    target_mean_spatial_path_speed_mps: float
+    target_mean_total_path_speed_mps: float
+    max_target_step_distance_m: float
+    corner_dwell_intervals: int = 0
+    dwell_entry_index: int | None = None
+    dwell_exit_index: int | None = None
+    corner_xy_m: np.ndarray | None = None
+    movement_subphase: tuple[str, ...] | None = None
 
 
 def _require_keys(value: Mapping[str, object], expected: set[str], label: str) -> None:
@@ -83,23 +107,32 @@ def _require_keys(value: Mapping[str, object], expected: set[str], label: str) -
 def load_geometry_config(path: str | Path) -> GeometryConfig:
     with Path(path).open("r", encoding="utf-8") as handle:
         raw = json.load(handle)
-    _require_keys(
-        raw,
-        {
-            "project",
-            "geometry_source",
-            "rule_count_active",
-            "rule_dim_total",
-            "unused_rule_index",
-            "target_long_medium_steps",
-            "train_speed_mps",
-            "train_speed_scalar",
-            "timing",
-            "stroke_start_sampling",
-            "checkpoint_validation",
-        },
-        "geometry configuration",
-    )
+    legacy_keys = {
+        "project",
+        "geometry_source",
+        "rule_count_active",
+        "rule_dim_total",
+        "unused_rule_index",
+        "target_long_medium_steps",
+        "train_speed_mps",
+        "train_speed_scalar",
+        "timing",
+        "stroke_start_sampling",
+        "checkpoint_validation",
+    }
+    timing_mode = str(raw.get("timing_mode", LEGACY_TIMING_MODE))
+    if timing_mode == LEGACY_TIMING_MODE:
+        expected_keys = legacy_keys | ({"timing_mode"} if "timing_mode" in raw else set())
+    elif timing_mode == FIXED_DURATION_TIMING_MODE:
+        expected_keys = legacy_keys | {
+            "timing_mode",
+            "movement_intervals",
+            "corner_dwell_intervals",
+            "corner_dwell_rules",
+        }
+    else:
+        raise ValueError(f"unsupported timing_mode: {timing_mode}")
+    _require_keys(raw, expected_keys, "geometry configuration")
     timing = raw["timing"]
     sampling = raw["stroke_start_sampling"]
     validation = raw["checkpoint_validation"]
@@ -150,6 +183,23 @@ def load_geometry_config(path: str | Path) -> GeometryConfig:
         "checkpoint_validation",
     )
 
+    fixed_intervals: tuple[tuple[str, int], ...] = ()
+    corner_dwell_intervals = 0
+    corner_dwell_rules: tuple[str, ...] = ()
+    if timing_mode == FIXED_DURATION_TIMING_MODE:
+        if raw["movement_intervals"] != {"fast": 50, "medium": 100, "slow": 150}:
+            raise ValueError("fixed-duration movement_intervals must be 50/100/150")
+        if raw["corner_dwell_intervals"] != 5:
+            raise ValueError("fixed-duration corner_dwell_intervals must be 5")
+        if raw["corner_dwell_rules"] != ["hengzhe", "shugou"]:
+            raise ValueError("fixed-duration corner_dwell_rules must be hengzhe/shugou")
+        fixed_intervals = tuple(
+            (speed_name, int(raw["movement_intervals"][speed_name]))
+            for speed_name in SPEED_NAMES
+        )
+        corner_dwell_intervals = 5
+        corner_dwell_rules = ("hengzhe", "shugou")
+
     config = GeometryConfig(
         project=str(raw["project"]),
         geometry_source=str(raw["geometry_source"]),
@@ -165,6 +215,10 @@ def load_geometry_config(path: str | Path) -> GeometryConfig:
         validation_delay_steps=int(validation["delay_steps"]),
         validation_seed=int(validation["validation_seed"]),
         validation_network_noise=bool(validation["network_noise"]),
+        timing_mode=timing_mode,
+        movement_intervals=fixed_intervals,
+        corner_dwell_intervals=corner_dwell_intervals,
+        corner_dwell_rules=corner_dwell_rules,
     )
     if config.project != PROJECT or config.geometry_source != GEOMETRY_SOURCE:
         raise ValueError("configuration names the wrong project or geometry authority")
@@ -349,9 +403,13 @@ def build_component_trajectory(
     condition: StrokeCondition | MoveCondition,
     speed_name: str,
     cue_normalizer_m: float,
+    geometry_config: GeometryConfig | None = None,
 ) -> ComponentTrajectory:
     if speed_name not in authority.TRAIN_SPEED_MPS:
         raise KeyError(f"unknown speed: {speed_name}")
+    timing_mode = (
+        LEGACY_TIMING_MODE if geometry_config is None else geometry_config.timing_mode
+    )
     speed = authority.TRAIN_SPEED_MPS[speed_name]
     if isinstance(condition, StrokeCondition):
         dense = condition.relative_points_m + condition.start_xy_m
@@ -361,17 +419,64 @@ def build_component_trajectory(
         dense = authority.straight_line(condition.start_xy_m, condition.goal_xy_m)
         rule = "move"
         cue = condition.goal_xy_m / cue_normalizer_m
-    intervals = authority.intervals_for_length(authority.arc_length(dense), speed)
-    points = authority.resample_by_arclength(dense, intervals)
+    dense_length = authority.arc_length(dense)
+    corner_dwell_intervals = 0
+    dwell_entry_index = None
+    dwell_exit_index = None
+    corner_xy_m = None
+    movement_subphase = None
+    if timing_mode == LEGACY_TIMING_MODE:
+        base_intervals = authority.intervals_for_length(dense_length, speed)
+        points = authority.resample_by_arclength(dense, base_intervals)
+    elif timing_mode == FIXED_DURATION_TIMING_MODE:
+        if geometry_config is None:
+            raise RuntimeError("fixed-duration trajectory requires a geometry config")
+        base_intervals = geometry_config.intervals_for_speed(speed_name)
+        if rule in geometry_config.corner_dwell_rules:
+            fixed = authority.fixed_duration_compound_trajectory(
+                dense,
+                base_intervals=base_intervals,
+                corner_dwell_intervals=geometry_config.corner_dwell_intervals,
+            )
+            points = fixed["points"]
+            corner_dwell_intervals = geometry_config.corner_dwell_intervals
+            dwell_entry_index = int(fixed["dwell_entry_index"])
+            dwell_exit_index = int(fixed["dwell_exit_index"])
+            corner_xy_m = np.asarray(fixed["corner_xy_m"], dtype=np.float64)
+            movement_subphase = tuple(str(value) for value in fixed["movement_subphase"])
+        else:
+            points = authority.resample_by_arclength(dense, base_intervals)
+    else:
+        raise RuntimeError(f"unhandled timing mode: {timing_mode}")
+    intervals = len(points) - 1
+    target_length = float(np.linalg.norm(np.diff(points, axis=0), axis=1).sum())
+    base_duration = base_intervals * authority.DT_S
+    total_duration = intervals * authority.DT_S
+    spatial_speed = target_length / base_duration
+    total_speed = target_length / total_duration
     return ComponentTrajectory(
         rule=rule,
         condition_id=condition.condition_id,
         speed_name=speed_name,
-        speed_mps=speed,
+        speed_mps=speed if timing_mode == LEGACY_TIMING_MODE else spatial_speed,
         speed_scalar=authority.TRAIN_SPEED_SCALAR[speed_name],
         movement_intervals=intervals,
         points_m=points,
         spatial_cue=cue,
+        base_movement_intervals=base_intervals,
+        target_path_length_m=target_length,
+        base_movement_duration_s=base_duration,
+        total_movement_duration_s=total_duration,
+        target_mean_spatial_path_speed_mps=spatial_speed,
+        target_mean_total_path_speed_mps=total_speed,
+        max_target_step_distance_m=float(
+            np.linalg.norm(np.diff(points, axis=0), axis=1).max()
+        ),
+        corner_dwell_intervals=corner_dwell_intervals,
+        dwell_entry_index=dwell_entry_index,
+        dwell_exit_index=dwell_exit_index,
+        corner_xy_m=corner_xy_m,
+        movement_subphase=movement_subphase,
     )
 
 

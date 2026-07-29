@@ -169,6 +169,79 @@ def resample_by_arclength(points: np.ndarray, intervals: int) -> np.ndarray:
     return output
 
 
+def compound_corner_index(points: np.ndarray) -> int:
+    """Locate the single direction discontinuity in an authoritative polyline."""
+
+    points = np.asarray(points, dtype=np.float64)
+    differences = np.diff(points, axis=0)
+    lengths = np.linalg.norm(differences, axis=1)
+    if len(differences) < 2 or np.any(lengths <= 0.0):
+        raise ValueError("compound trajectory must contain nonzero adjacent segments")
+    directions = differences / lengths[:, None]
+    direction_changes = 1.0 - np.sum(directions[:-1] * directions[1:], axis=1)
+    corner_index = int(np.argmax(direction_changes)) + 1
+    if float(direction_changes[corner_index - 1]) <= 0.0:
+        raise ValueError("compound trajectory has no direction change")
+    return corner_index
+
+
+def fixed_duration_compound_trajectory(
+    points: np.ndarray,
+    *,
+    base_intervals: int,
+    corner_dwell_intervals: int,
+) -> dict:
+    """Resample two spatial segments and splice an exact fixed corner dwell."""
+
+    if base_intervals < 2 or corner_dwell_intervals < 1:
+        raise ValueError("compound timing requires spatial and dwell intervals")
+    dense = np.asarray(points, dtype=np.float64)
+    corner_index = compound_corner_index(dense)
+    first_dense = dense[: corner_index + 1]
+    second_dense = dense[corner_index:]
+    first_length = arc_length(first_dense)
+    second_length = arc_length(second_dense)
+    first_intervals = int(
+        math.floor(base_intervals * first_length / (first_length + second_length) + 0.5)
+    )
+    second_intervals = base_intervals - first_intervals
+    if first_intervals < 1 or second_intervals < 1:
+        raise RuntimeError("compound interval allocation produced an empty segment")
+    first = resample_by_arclength(first_dense, first_intervals)
+    second = resample_by_arclength(second_dense, second_intervals)
+    corner = dense[corner_index].copy()
+    dwell = np.repeat(corner[None, :], corner_dwell_intervals, axis=0)
+    full = np.concatenate((first, dwell, second[1:]), axis=0)
+    dwell_entry = first_intervals
+    dwell_exit = first_intervals + corner_dwell_intervals
+    expected_samples = base_intervals + corner_dwell_intervals + 1
+    if len(full) != expected_samples:
+        raise RuntimeError("compound target sample count is off by one")
+    if not np.array_equal(first[-1], corner) or not np.array_equal(second[0], corner):
+        raise RuntimeError("compound resampling did not preserve the authority corner")
+    if not np.array_equal(full[dwell_entry : dwell_exit + 1], np.repeat(corner[None, :], corner_dwell_intervals + 1, axis=0)):
+        raise RuntimeError("compound dwell is not an exact repeated authority corner")
+    if not np.array_equal(np.diff(full[dwell_entry : dwell_exit + 1], axis=0), np.zeros((corner_dwell_intervals, 2), dtype=np.float64)):
+        raise RuntimeError("compound dwell does not contain exact zero-displacement intervals")
+    subphase = (
+        ["pre_corner"] * first_intervals
+        + ["corner_dwell"] * (corner_dwell_intervals + 1)
+        + ["post_corner"] * second_intervals
+    )
+    return {
+        "points": full,
+        "corner_xy_m": corner,
+        "corner_dense_index": corner_index,
+        "first_length_m": first_length,
+        "second_length_m": second_length,
+        "first_intervals": first_intervals,
+        "second_intervals": second_intervals,
+        "dwell_entry_index": dwell_entry,
+        "dwell_exit_index": dwell_exit,
+        "movement_subphase": tuple(subphase),
+    }
+
+
 def intervals_for_length(length_m: float, speed_mps: float, dt_s: float = DT_S) -> int:
     if length_m <= 0.0 or speed_mps <= 0.0 or dt_s <= 0.0:
         raise ValueError("length, speed, and dt must all be positive")
@@ -384,6 +457,10 @@ def assemble_character_schedule(
     prepare_steps: int = PREPARE_STEPS,
     final_hold_steps: int = FINAL_HOLD_STEPS,
     cue_normalizer_m: float | None = None,
+    timing_mode: str = "legacy_arc_length_fixed_speed",
+    movement_intervals: Mapping[str, int] | None = None,
+    corner_dwell_intervals: int = 0,
+    corner_dwell_rules: Sequence[str] = (),
 ) -> dict:
     """Build a frozen full-character temporal-composition schedule.
 
@@ -394,6 +471,16 @@ def assemble_character_schedule(
 
     if speed_name not in TRAIN_SPEED_MPS:
         raise KeyError(f"unknown speed: {speed_name}")
+    if timing_mode not in {
+        "legacy_arc_length_fixed_speed",
+        "fixed_movement_duration",
+    }:
+        raise ValueError(f"unsupported timing mode: {timing_mode}")
+    if timing_mode == "fixed_movement_duration":
+        if movement_intervals is None or set(movement_intervals) != set(TRAIN_SPEED_MPS):
+            raise ValueError("fixed-duration schedule requires all three interval values")
+        if corner_dwell_intervals != 5 or tuple(corner_dwell_rules) != ("hengzhe", "shugou"):
+            raise ValueError("fixed-duration schedule requires the frozen corner dwell")
     speed = TRAIN_SPEED_MPS[speed_name]
     speed_scalar = TRAIN_SPEED_SCALAR[speed_name]
     if cue_normalizer_m is None:
@@ -408,6 +495,7 @@ def assemble_character_schedule(
     cue_rows: List[np.ndarray] = []
     writing_rows: List[bool] = []
     phase_rows: List[str] = []
+    movement_subphase_rows: List[str] = []
     segment_records: List[dict] = []
 
     def append_constant(
@@ -429,6 +517,8 @@ def assemble_character_schedule(
             cue_rows.append(cue.copy())
             writing_rows.append(writing)
             phase_rows.append(phase)
+            if timing_mode == "fixed_movement_duration":
+                movement_subphase_rows.append("")
         segment_records.append(
             {
                 "phase": phase,
@@ -445,6 +535,8 @@ def assemble_character_schedule(
         cue: np.ndarray,
         writing: bool,
         phase: str,
+        subphase: Sequence[str] | None = None,
+        movement_metadata: Mapping[str, object] | None = None,
     ) -> None:
         start_index = len(target_rows)
         for point in points:
@@ -455,15 +547,21 @@ def assemble_character_schedule(
             cue_rows.append(cue.copy())
             writing_rows.append(writing)
             phase_rows.append(phase)
-        segment_records.append(
-            {
-                "phase": phase,
-                "rule": rule,
-                "start_index": start_index,
-                "end_index_exclusive": len(target_rows),
-                "writing": writing,
-            }
-        )
+        if timing_mode == "fixed_movement_duration":
+            labels = [""] * len(points) if subphase is None else list(subphase)
+            if len(labels) != len(points):
+                raise RuntimeError("movement subphase and target lengths differ")
+            movement_subphase_rows.extend(labels)
+        record = {
+            "phase": phase,
+            "rule": rule,
+            "start_index": start_index,
+            "end_index_exclusive": len(target_rows),
+            "writing": writing,
+        }
+        if timing_mode == "fixed_movement_duration" and movement_metadata is not None:
+            record.update(movement_metadata)
+        segment_records.append(record)
 
     first_stroke = character.strokes[0]
     append_constant(
@@ -488,14 +586,39 @@ def assemble_character_schedule(
     )
 
     for stroke_index, stroke in enumerate(character.strokes):
-        stroke_intervals = intervals_for_length(arc_length(stroke.points), speed)
-        sampled_stroke = resample_by_arclength(stroke.points, stroke_intervals)
+        if timing_mode == "legacy_arc_length_fixed_speed":
+            stroke_intervals = intervals_for_length(arc_length(stroke.points), speed)
+            sampled_stroke = resample_by_arclength(stroke.points, stroke_intervals)
+            stroke_subphase = None
+            stroke_metadata = None
+        else:
+            base_intervals = int(movement_intervals[speed_name])
+            if stroke.label in corner_dwell_rules:
+                fixed = fixed_duration_compound_trajectory(
+                    stroke.points,
+                    base_intervals=base_intervals,
+                    corner_dwell_intervals=corner_dwell_intervals,
+                )
+                sampled_stroke = fixed["points"]
+                stroke_subphase = fixed["movement_subphase"]
+                stroke_metadata = {
+                    "base_movement_intervals": base_intervals,
+                    "corner_dwell_intervals": corner_dwell_intervals,
+                    "dwell_entry_index_within_segment": fixed["dwell_entry_index"],
+                    "dwell_exit_index_within_segment": fixed["dwell_exit_index"],
+                }
+            else:
+                sampled_stroke = resample_by_arclength(stroke.points, base_intervals)
+                stroke_subphase = None
+                stroke_metadata = {"base_movement_intervals": base_intervals}
         append_movement(
             sampled_stroke,
             stroke.label,
             np.zeros(2),
             True,
             f"stroke_movement_{stroke_index}",
+            stroke_subphase,
+            stroke_metadata,
         )
 
         if stroke_index == len(character.strokes) - 1:
@@ -525,7 +648,11 @@ def assemble_character_schedule(
             True,
         )
         move_points = _line(stroke.points[-1], goal)
-        move_intervals = intervals_for_length(arc_length(move_points), speed)
+        move_intervals = (
+            intervals_for_length(arc_length(move_points), speed)
+            if timing_mode == "legacy_arc_length_fixed_speed"
+            else int(movement_intervals[speed_name])
+        )
         sampled_move = resample_by_arclength(move_points, move_intervals)
         append_movement(
             sampled_move,
@@ -533,6 +660,12 @@ def assemble_character_schedule(
             goal_cue,
             False,
             f"move_movement_{stroke_index}",
+            None,
+            (
+                None
+                if timing_mode == "legacy_arc_length_fixed_speed"
+                else {"base_movement_intervals": move_intervals}
+            ),
         )
         append_constant(
             goal,
@@ -545,10 +678,9 @@ def assemble_character_schedule(
             True,
         )
 
-    return {
+    output = {
         "character": character.name,
         "speed_name": speed_name,
-        "speed_mps": speed,
         "cue_scale_m": cue_normalizer_m,
         "target_xy_m": np.asarray(target_rows, dtype=np.float64),
         "rule_input": np.asarray(rule_rows, dtype=np.float64),
@@ -559,6 +691,12 @@ def assemble_character_schedule(
         "phase": phase_rows,
         "segments": segment_records,
     }
+    if timing_mode == "legacy_arc_length_fixed_speed":
+        output["speed_mps"] = speed
+    else:
+        output["timing_mode"] = timing_mode
+        output["movement_subphase"] = movement_subphase_rows
+    return output
 
 
 def _angle_between_undirected(vector_a: np.ndarray, vector_b: np.ndarray) -> float:
