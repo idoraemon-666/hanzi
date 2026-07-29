@@ -239,7 +239,7 @@ class FixedDurationContractTests(unittest.TestCase):
 
         class GeneratorHolder:
             def __init__(self):
-                self.generator = np.random.default_rng(42)
+                self._np_random = np.random.default_rng(42)
 
         validation_value = {
             "aggregate": {"phase_normalized_position_l1": 1.0},
@@ -270,6 +270,10 @@ class FixedDurationContractTests(unittest.TestCase):
                 )
         self.assertEqual(first["validation"], second["validation"])
         self.assertTrue(all(value for value in first["read_only_checks"].values() if isinstance(value, bool)))
+        self.assertEqual(
+            first["read_only_checks"]["captured_environment_generator_paths"],
+            ["GeneratorHolder._np_random"],
+        )
 
 
 if __name__ == "__main__":

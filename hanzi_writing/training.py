@@ -762,7 +762,15 @@ def _environment_generator_states(root: Any) -> list[tuple[Any, str, Any, str]]:
             if isinstance(
                 child,
                 (torch.Generator, np.random.Generator, np.random.RandomState, random.Random),
-            ) or name in {"effector", "skeleton", "muscle", "generator", "rng"}:
+            ) or name in {
+                "effector",
+                "skeleton",
+                "muscle",
+                "generator",
+                "rng",
+                "np_random",
+                "_np_random",
+            }:
                 visit(child, f"{path}.{name}", depth + 1)
 
     visit(root, type(root).__name__, 0)
@@ -812,9 +820,11 @@ def readonly_checkpoint_validation(
     python_rng = copy.deepcopy(random.getstate())
     numpy_rng = copy.deepcopy(np.random.get_state())
     torch_rng = torch.get_rng_state().clone()
-    generator_states = (
-        [] if training_env is None else _environment_generator_states(training_env)
-    )
+    if training_env is None:
+        raise ValueError("read-only validation requires the active training environment")
+    generator_states = _environment_generator_states(training_env)
+    if not generator_states:
+        raise RuntimeError("training environment RNG snapshot is empty")
     checkpoint_hashes = {
         str(Path(path)): _sha256_file(path) for path in checkpoint_paths
     }
@@ -848,6 +858,7 @@ def readonly_checkpoint_validation(
                 _generator_state_equal(generator, kind, state)
                 for generator, kind, state, _ in generator_states
             ),
+            "environment_generator_capture_nonempty": bool(generator_states),
             "checkpoint_files_unchanged": checkpoint_hashes
             == {str(Path(path)): _sha256_file(path) for path in checkpoint_paths},
         }
