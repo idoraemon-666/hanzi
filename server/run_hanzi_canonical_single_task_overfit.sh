@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ $# -ne 3 ]]; then
-  echo "Usage: bash server/run_hanzi_canonical_single_task_overfit.sh REPO ARCHIVE_BASE EXPECTED_HEAD" >&2
+if [[ $# -ne 4 ]]; then
+  echo "Usage: bash server/run_hanzi_canonical_single_task_overfit.sh REPO ARCHIVE_BASE EXPECTED_HEAD APPROVED_STAGE0" >&2
   exit 2
 fi
 if [[ "${HANZI_TEMPORAL_COMPOSITION_AUTHORIZED_RUN:-}" != "canonical-single-duration-overfit-stage0-stage1" ]]; then
@@ -13,6 +13,7 @@ fi
 REPO="$(realpath "$1")"
 ARCHIVE_BASE="$(realpath -m "$2")"
 EXPECTED_HEAD="$3"
+APPROVED_STAGE0="$(realpath "$4")"
 PYTHON=/root/autodl-tmp/conda/envs/hanzi-stroke-temporal-composition-cpu/bin/python
 SUBMODULE_HEAD=ac0c4f589eae37bbde63968912925de99232e306
 CONFIG_RELATIVE=configurations/hanzi_stroke_temporal_composition_canonical_single_task_overfit_v1.json
@@ -26,6 +27,7 @@ test -d "$REPO/.git"
 test -x "$PYTHON"
 test -f "$REPO/$CONFIG_RELATIVE"
 test -f "$REPO/$SHARED_RELATIVE"
+test -d "$APPROVED_STAGE0"
 test "$(git -C "$REPO" branch --show-current)" = "codex/hanzi-stroke-temporal-composition"
 test "$(git -C "$REPO" rev-parse HEAD)" = "$EXPECTED_HEAD"
 test "$(git -C "$REPO/mRNNTorch" rev-parse HEAD)" = "$SUBMODULE_HEAD"
@@ -48,6 +50,30 @@ set +e
   export MKL_NUM_THREADS=1
   export PYTHONDONTWRITEBYTECODE=1
   export PYTHONHASHSEED=0
+  (
+    cd "$APPROVED_STAGE0"
+    sha256sum -c SHA256SUMS
+  )
+  APPROVED_STAGE0="$APPROVED_STAGE0" EXPECTED_HEAD="$EXPECTED_HEAD" \
+    SUBMODULE_HEAD="$SUBMODULE_HEAD" "$PYTHON" - <<'PY'
+import json
+import os
+from pathlib import Path
+
+root = Path(os.environ["APPROVED_STAGE0"])
+with (root / "provenance.json").open(encoding="utf-8") as handle:
+    provenance = json.load(handle)
+assert provenance["completed"] is True
+assert provenance["formal_stage0_completed"] is True
+assert provenance["git_head"] == os.environ["EXPECTED_HEAD"]
+assert provenance["submodule_head"] == os.environ["SUBMODULE_HEAD"]
+assert provenance["target_rows"] == 3120
+assert provenance["canonical_stage1_started"] is False
+assert provenance["shared_9task_started"] is False
+assert provenance["formal_75k_started"] is False
+assert provenance["complete_character_rollout_started"] is False
+print("APPROVED_CANONICAL_STAGE0_VERIFIED=1")
+PY
   "$PYTHON" - <<'PY'
 import importlib.metadata
 import torch
@@ -70,7 +96,9 @@ PY
     tests.test_hanzi_canonical_overfit
   echo "CANONICAL_STAGE0_STAGE1_STARTED=1"
   echo "CANONICAL_SHARED_9TASK_STARTED=0"
-  "$PYTHON" -m hanzi_writing.canonical_overfit --config "$CONFIG_RELATIVE"
+  "$PYTHON" -m hanzi_writing.canonical_overfit \
+    --config "$CONFIG_RELATIVE" \
+    --approved-stage0 "$APPROVED_STAGE0"
 ) 2>&1 | tee "$LOG_TMP"
 RUN_CODES=("${PIPESTATUS[@]}")
 set -e
@@ -82,7 +110,7 @@ if [[ "$PROGRAM_EXIT" -ne 0 || "$TEE_EXIT" -ne 0 ]]; then
 fi
 
 TEST_COUNT="$(sed -nE 's/^Ran ([0-9]+) tests? in .*/\1/p' "$LOG_TMP" | tail -n 1)"
-test "$TEST_COUNT" = 61
+test "$TEST_COUNT" = 63
 if grep -Eq '^OK \(.*skipped=[1-9][0-9]*.*\)$' "$LOG_TMP"; then
   echo "ABORT: skipped tests are forbidden" >&2
   exit 1
@@ -92,8 +120,9 @@ mv "$LOG_TMP" "$OUTPUT_DIR/execution.log"
 printf 'PROGRAM_EXIT=%s\nTEE_EXIT=%s\n' "$PROGRAM_EXIT" "$TEE_EXIT" \
   > "$OUTPUT_DIR/exit_code.txt"
 
-REPO="$REPO" OUTPUT_DIR="$OUTPUT_DIR" TEST_COUNT="$TEST_COUNT" \
-PROGRAM_EXIT="$PROGRAM_EXIT" TEE_EXIT="$TEE_EXIT" "$PYTHON" - <<'PY'
+REPO="$REPO" OUTPUT_DIR="$OUTPUT_DIR" APPROVED_STAGE0="$APPROVED_STAGE0" \
+TEST_COUNT="$TEST_COUNT" PROGRAM_EXIT="$PROGRAM_EXIT" TEE_EXIT="$TEE_EXIT" \
+"$PYTHON" - <<'PY'
 import csv
 import hashlib
 import json
@@ -176,6 +205,12 @@ assert provenance["integrity"] == {
     "single_tasks_completed": 9,
 }
 assert len(provenance["checkpoint_sha256"]) == 18
+assert provenance["approved_stage0_directory"] == os.environ["APPROVED_STAGE0"]
+assert set(provenance["approved_stage0_sha256"]) == {
+    "canonical_condition_manifest.json",
+    "canonical_target_trajectories.npz",
+    "canonical_target_audit.png",
+}
 for relative, expected in provenance["checkpoint_sha256"].items():
     assert sha256(output / relative) == expected
 assert provenance["shared_9task_started"] is False

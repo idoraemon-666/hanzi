@@ -22,6 +22,7 @@ import torch
 from hanzi_writing.canonical_protocol import (
     COMPOUND_RULES,
     EXPECTED_TARGET_ROWS,
+    STAGE0_ARTIFACT_NAMES,
     canonical_stroke_conditions,
     write_stage0_artifacts,
 )
@@ -957,13 +958,41 @@ def _git_value(*arguments: str) -> str:
     return result.stdout.strip()
 
 
-def run_canonical_single_task_overfit(config_path: str | Path) -> dict[str, Any]:
+def require_approved_stage0(
+    generated_directory: str | Path,
+    approved_directory: str | Path,
+) -> dict[str, str]:
+    generated = Path(generated_directory)
+    approved = Path(approved_directory)
+    if not approved.is_dir():
+        raise FileNotFoundError("approved canonical Stage-0 directory is missing")
+    approved_hashes = {}
+    for name in STAGE0_ARTIFACT_NAMES:
+        generated_path = generated / name
+        approved_path = approved / name
+        if not generated_path.is_file() or not approved_path.is_file():
+            raise FileNotFoundError(f"canonical Stage-0 artifact is missing: {name}")
+        generated_hash = _sha256_file(generated_path)
+        approved_hash = _sha256_file(approved_path)
+        if generated_hash != approved_hash:
+            raise RuntimeError(f"approved canonical Stage-0 artifact differs: {name}")
+        approved_hashes[name] = approved_hash
+    return approved_hashes
+
+
+def run_canonical_single_task_overfit(
+    config_path: str | Path,
+    approved_stage0_directory: str | Path,
+) -> dict[str, Any]:
     config, geometry = load_canonical_overfit_config(config_path)
     validate_frozen_shared_config(
         "configurations/hanzi_stroke_temporal_composition_canonical_shared_9task_v1.json"
     )
     output = Path(config["output"]["directory"])
     stage0 = write_stage0_artifacts(geometry, output)
+    approved_stage0_sha256 = require_approved_stage0(
+        output, approved_stage0_directory
+    )
     model_root = output / "models"
     model_root.mkdir(exist_ok=False)
     task_summaries = []
@@ -1032,6 +1061,8 @@ def run_canonical_single_task_overfit(config_path: str | Path) -> dict[str, Any]
         "submodule_head": _git_value("-C", "mRNNTorch", "rev-parse", "HEAD"),
         "config_sha256": _sha256_file(config_path),
         "geometry_config_sha256": _sha256_file(config["geometry_config"]),
+        "approved_stage0_directory": str(Path(approved_stage0_directory)),
+        "approved_stage0_sha256": approved_stage0_sha256,
         "checkpoint_sha256": checkpoint_sha256,
         "stage0": stage0,
         "task_summaries": task_summaries,
@@ -1055,8 +1086,11 @@ def run_canonical_single_task_overfit(config_path: str | Path) -> dict[str, Any]
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True)
+    parser.add_argument("--approved-stage0", required=True)
     arguments = parser.parse_args()
-    run_canonical_single_task_overfit(arguments.config)
+    run_canonical_single_task_overfit(
+        arguments.config, arguments.approved_stage0
+    )
 
 
 if __name__ == "__main__":

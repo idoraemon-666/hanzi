@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import math
 from pathlib import Path
@@ -21,12 +22,18 @@ from hanzi_writing.geometry import (
     GeometryConfig,
     MoveCondition,
     StrokeCondition,
+    load_geometry_config,
     move_conditions,
 )
 
 
 COMPOUND_RULES = ("hengzhe", "shugou")
 EXPECTED_TARGET_ROWS = 3120
+STAGE0_ARTIFACT_NAMES = (
+    "canonical_condition_manifest.json",
+    "canonical_target_trajectories.npz",
+    "canonical_target_audit.png",
+)
 _TOLERANCE = 1e-12
 
 
@@ -533,11 +540,7 @@ def write_stage0_artifacts(
     _write_json(output / "canonical_condition_manifest.json", manifest)
     np.savez_compressed(output / "canonical_target_trajectories.npz", **arrays)
     _plot_target_audit(output / "canonical_target_audit.png", entries)
-    expected = {
-        "canonical_condition_manifest.json",
-        "canonical_target_trajectories.npz",
-        "canonical_target_audit.png",
-    }
+    expected = set(STAGE0_ARTIFACT_NAMES)
     if {path.name for path in output.iterdir()} != expected:
         raise RuntimeError("canonical Stage-0 output set differs")
     return {
@@ -545,3 +548,40 @@ def write_stage0_artifacts(
         "target_rows": len(arrays["sample_index"]),
         "artifacts": sorted(str(output / name) for name in expected),
     }
+
+
+def run_canonical_stage0(
+    geometry_config_path: str | Path,
+    output_directory: str | Path,
+) -> dict[str, Any]:
+    config = load_geometry_config(geometry_config_path)
+    if (
+        config.timing_mode != CANONICAL_TIMING_MODE
+        or config.geometry_variant != CANONICAL_GEOMETRY_VARIANT
+    ):
+        raise ValueError("canonical Stage 0 requires the strict canonical geometry")
+    result = write_stage0_artifacts(config, output_directory)
+    print(
+        json.dumps(
+            {
+                "artifact_count": len(result["artifacts"]),
+                "output_directory": str(Path(output_directory)),
+                "target_rows": result["target_rows"],
+            },
+            sort_keys=True,
+        ),
+        flush=True,
+    )
+    return result
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--geometry-config", required=True)
+    parser.add_argument("--output", required=True)
+    arguments = parser.parse_args()
+    run_canonical_stage0(arguments.geometry_config, arguments.output)
+
+
+if __name__ == "__main__":
+    main()

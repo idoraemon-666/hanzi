@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -201,6 +204,37 @@ class CanonicalProtocolTests(unittest.TestCase):
                 self.assertFalse(any(arrays[name].dtype == object for name in arrays.files))
             with self.assertRaises(FileExistsError):
                 write_stage0_artifacts(self.geometry, output)
+
+    def test_stage0_artifacts_are_cross_process_reproducible(self) -> None:
+        with tempfile.TemporaryDirectory() as parent:
+            outputs = [Path(parent) / name for name in ("first", "second")]
+            for output in outputs:
+                subprocess.run(
+                    [
+                        sys.executable,
+                        "-B",
+                        "-m",
+                        "hanzi_writing.canonical_protocol",
+                        "--geometry-config",
+                        str(GEOMETRY_PATH),
+                        "--output",
+                        str(output),
+                    ],
+                    cwd=ROOT,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+            for name in (
+                "canonical_condition_manifest.json",
+                "canonical_target_trajectories.npz",
+                "canonical_target_audit.png",
+            ):
+                hashes = [
+                    hashlib.sha256((output / name).read_bytes()).hexdigest()
+                    for output in outputs
+                ]
+                self.assertEqual(hashes[0], hashes[1], name)
 
     def test_canonical_and_old_schemas_do_not_cross_accept(self) -> None:
         raw = json.loads(GEOMETRY_PATH.read_text(encoding="utf-8"))

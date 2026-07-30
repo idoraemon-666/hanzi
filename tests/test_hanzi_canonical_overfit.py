@@ -16,11 +16,13 @@ from hanzi_writing.canonical_overfit import (
     _train_task,
     canonical_readonly_validation,
     load_canonical_overfit_config,
+    require_approved_stage0,
     validate_frozen_shared_config,
 )
 from hanzi_writing.canonical_protocol import (
     canonical_stroke_conditions,
     canonical_target_trajectory,
+    write_stage0_artifacts,
 )
 from hanzi_writing.envs import HanziComponentEnv
 from hanzi_writing.geometry import move_conditions
@@ -40,6 +42,7 @@ SHARED_PATH = (
     / "hanzi_stroke_temporal_composition_canonical_shared_9task_v1.json"
 )
 SERVER_PATH = ROOT / "server" / "run_hanzi_canonical_single_task_overfit.sh"
+STAGE0_SERVER_PATH = ROOT / "server" / "run_hanzi_canonical_stage0.sh"
 
 
 class CanonicalOverfitTests(unittest.TestCase):
@@ -118,13 +121,31 @@ class CanonicalOverfitTests(unittest.TestCase):
 
     def test_server_runner_is_authorized_and_hanzi_only(self) -> None:
         script = SERVER_PATH.read_text(encoding="utf-8")
+        stage0_script = STAGE0_SERVER_PATH.read_text(encoding="utf-8")
         self.assertIn(
             "canonical-single-duration-overfit-stage0-stage1", script
         )
         self.assertIn("hanzi_writing.canonical_overfit", script)
+        self.assertIn("--approved-stage0", script)
         self.assertIn("CANONICAL_SHARED_9TASK_STARTED=0", script)
-        self.assertNotIn("unittest discover", script)
-        self.assertNotIn("test_digit", script)
+        self.assertIn("canonical-single-duration-stage0-dev42", stage0_script)
+        self.assertIn("hanzi_writing.canonical_protocol", stage0_script)
+        for value in (script, stage0_script):
+            self.assertNotIn("unittest discover", value)
+            self.assertNotIn("test_digit", value)
+
+    def test_stage1_requires_bitwise_identical_approved_stage0(self) -> None:
+        with tempfile.TemporaryDirectory() as parent:
+            approved = Path(parent) / "approved"
+            generated = Path(parent) / "generated"
+            write_stage0_artifacts(self.geometry, approved)
+            write_stage0_artifacts(self.geometry, generated)
+            hashes = require_approved_stage0(generated, approved)
+            self.assertEqual(len(hashes), 3)
+            with (approved / "canonical_target_audit.png").open("ab") as handle:
+                handle.write(b"different")
+            with self.assertRaises(RuntimeError):
+                require_approved_stage0(generated, approved)
 
     def test_one_update_single_task_smoke_writes_required_checkpoint_files(self) -> None:
         config = copy.deepcopy(self.config)
