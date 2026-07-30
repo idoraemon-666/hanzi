@@ -1,0 +1,33 @@
+{
+  "project": "hanzi_stroke_temporal_composition",
+  "run_kind": "canonical_eight_stroke_scratch_low_lr",
+  "variant": "canonical_eight_stroke_scratch_lr1e4_v1",
+  "enabled": true,
+  "base_config": "configurations/hanzi_stroke_temporal_composition_canonical_single_task_overfit_v1.json",
+  "active_rules": ["heng", "shu", "pie", "na", "dian", "ti", "hengzhe", "shugou"],
+  "optimizer": {
+    "learning_rate": 0.0001,
+    "initialization": "fresh_seed_42"
+  },
+  "training": {
+    "updates": 10000,
+    "validation_interval": 100,
+    "log_interval": 100,
+    "parallel_processes": 8
+  },
+  "diagnostic_contract": {
+    "metrics_rows": 16,
+    "trajectory_rows": 2616,
+    "plots": 9,
+    "behavioral_pass_fail": "not_defined"
+  },
+  "exclusions": {
+    "move": true,
+    "shared_9task": true,
+    "formal_75k": true,
+    "complete_character_rollout": true
+  },
+  "output": {
+    "directory": "runs/hanzi_stroke_temporal_composition/canonical_stroke_scratch_lr1e4_10000/dev42"
+  }
+}

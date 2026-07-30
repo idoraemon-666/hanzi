@@ -14,6 +14,10 @@ The active branch is `hanzi_stroke_temporal_composition`. Its server files are:
 - `run_hanzi_fixed_duration_preflight.sh`: fixed-duration target audit, deterministic
   coverage, 100-update technical smoke, and read-only validation benchmark. It
   stops without starting the 10k pilot or either formal training run.
+- `run_hanzi_canonical_parallel_lr_lines.sh`: separately authorized 12-process
+  CPU runner for the eight fresh `1e-4`/10000-update stroke tasks and the four
+  exact 2000-update refinement continuations. It excludes move and writes two
+  isolated outputs and archives.
 
 Use the generated upload package and its short `RUN_AUDIT.sh` command instead of
 manually reconstructing the repository or pasting a long command sequence.

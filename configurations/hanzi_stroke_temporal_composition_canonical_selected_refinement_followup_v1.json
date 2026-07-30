@@ -1,0 +1,51 @@
+{
+  "project": "hanzi_stroke_temporal_composition",
+  "run_kind": "canonical_selected_refinement_followup",
+  "variant": "canonical_selected_refinement_followup_v1",
+  "enabled": true,
+  "base_config": "configurations/hanzi_stroke_temporal_composition_canonical_stroke_refinement_v1.json",
+  "active_rules": ["heng", "pie", "na", "shugou"],
+  "source_contract": {
+    "variant": "canonical_stroke_refinement_v1",
+    "git_head": "d763b59ccc09d6e8673f518f0aead89094fb2226",
+    "completed_additional_updates": 2000,
+    "learning_rate": 0.0001,
+    "continuation_checkpoint": "exact_optimizer_global_rng_environment_rng"
+  },
+  "optimizer": {
+    "learning_rate": 0.0001,
+    "source_optimizer_state": "preserve_exact_continuation_state"
+  },
+  "training": {
+    "additional_updates": 2000,
+    "target_total_refinement_updates": 4000,
+    "validation_interval": 100,
+    "log_interval": 100,
+    "parallel_processes": 4
+  },
+  "diagnostic_contract": {
+    "metrics_rows": 12,
+    "trajectory_rows": 1962,
+    "plots": 5,
+    "behavioral_pass_fail": "not_defined"
+  },
+  "selection_basis": {
+    "heng": "best scheduled validation occurred at refinement update 1900",
+    "pie": "terminal review improved beyond the scheduled best",
+    "na": "terminal review improved beyond the scheduled best",
+    "shugou": "best scheduled validation occurred at refinement update 1900"
+  },
+  "exclusions": {
+    "move": true,
+    "shu": true,
+    "dian": true,
+    "ti": true,
+    "hengzhe": true,
+    "shared_9task": true,
+    "formal_75k": true,
+    "complete_character_rollout": true
+  },
+  "output": {
+    "directory": "runs/hanzi_stroke_temporal_composition/canonical_stroke_refinement_followup/dev42"
+  }
+}
