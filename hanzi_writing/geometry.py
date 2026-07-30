@@ -19,6 +19,9 @@ ACTIVE_RULES = tuple(authority.RULE_INDEX)
 SPEED_NAMES = tuple(authority.TRAIN_SPEED_MPS)
 LEGACY_TIMING_MODE = "legacy_arc_length_fixed_speed"
 FIXED_DURATION_TIMING_MODE = "fixed_movement_duration"
+CANONICAL_TIMING_MODE = "canonical_fixed_duration"
+CANONICAL_GEOMETRY_VARIANT = "canonical_tangent_rounded_v1"
+CANONICAL_STROKE_RULES = ACTIVE_RULES[:-1]
 
 
 @dataclass(frozen=True)
@@ -41,6 +44,14 @@ class GeometryConfig:
     movement_intervals: tuple[tuple[str, int], ...] = ()
     corner_dwell_intervals: int = 0
     corner_dwell_rules: tuple[str, ...] = ()
+    geometry_variant: str | None = None
+    canonical_speed_name: str | None = None
+    canonical_simple_intervals: int = 0
+    canonical_compound_intervals: int = 0
+    canonical_move_intervals: int = 0
+    canonical_transition_intervals: int = 0
+    canonical_trim_ratio: float = 0.0
+    canonical_bezier_reference_samples: int = 0
 
     def intervals_for_speed(self, speed_name: str) -> int:
         values = dict(self.movement_intervals)
@@ -93,6 +104,7 @@ class ComponentTrajectory:
     dwell_exit_index: int | None = None
     corner_xy_m: np.ndarray | None = None
     movement_subphase: tuple[str, ...] | None = None
+    canonical_rounding: Mapping[str, object] | None = None
 
 
 def _require_keys(value: Mapping[str, object], expected: set[str], label: str) -> None:
@@ -102,6 +114,137 @@ def _require_keys(value: Mapping[str, object], expected: set[str], label: str) -
             f"{label} keys differ; missing={sorted(expected - actual)}, "
             f"extra={sorted(actual - expected)}"
         )
+
+
+def _load_canonical_geometry_config(raw: dict[str, object]) -> GeometryConfig:
+    expected_keys = {
+        "project",
+        "geometry_source",
+        "rule_count_active",
+        "rule_dim_total",
+        "unused_rule_index",
+        "target_long_medium_steps",
+        "train_speed_mps",
+        "train_speed_scalar",
+        "timing_mode",
+        "geometry_variant",
+        "timing",
+        "canonical_conditions",
+        "checkpoint_validation",
+    }
+    _require_keys(raw, expected_keys, "canonical geometry configuration")
+    timing = raw["timing"]
+    conditions = raw["canonical_conditions"]
+    validation = raw["checkpoint_validation"]
+    if not all(isinstance(value, dict) for value in (timing, conditions, validation)):
+        raise ValueError("canonical timing, conditions, and validation must be objects")
+    _require_keys(
+        timing,
+        {"dt_seconds", "stable_steps", "delay_steps", "hold_steps", "prepare_steps"},
+        "canonical timing",
+    )
+    _require_keys(
+        conditions,
+        {
+            "stroke_rules",
+            "stroke_selection",
+            "moves",
+            "speed_name",
+            "simple_stroke_intervals",
+            "compound_stroke_intervals",
+            "move_intervals",
+            "transition_intervals",
+            "trim_ratio",
+            "bezier_reference_samples",
+        },
+        "canonical conditions",
+    )
+    _require_keys(
+        validation,
+        {
+            "delay_steps",
+            "validation_seed",
+            "network_noise",
+            "deterministic_observation",
+            "aggregation",
+        },
+        "canonical checkpoint validation",
+    )
+    expected_conditions = {
+        "stroke_rules": list(CANONICAL_STROKE_RULES),
+        "stroke_selection": (
+            "maximum_physical_arc_length_then_character_stroke_condition"
+        ),
+        "moves": "all_12_exact_transitions",
+        "speed_name": "slow",
+        "simple_stroke_intervals": 150,
+        "compound_stroke_intervals": 200,
+        "move_intervals": 150,
+        "transition_intervals": 20,
+        "trim_ratio": 0.1,
+        "bezier_reference_samples": 10001,
+    }
+    if conditions != expected_conditions:
+        raise ValueError("canonical condition contract differs")
+    if validation != {
+        "delay_steps": 50,
+        "validation_seed": 1042,
+        "network_noise": False,
+        "deterministic_observation": True,
+        "aggregation": "single_condition_or_equal_12_moves",
+    }:
+        raise ValueError("canonical validation contract differs")
+    if raw["timing_mode"] != CANONICAL_TIMING_MODE:
+        raise ValueError("canonical geometry requires canonical_fixed_duration")
+    if raw["geometry_variant"] != CANONICAL_GEOMETRY_VARIANT:
+        raise ValueError("canonical geometry variant differs")
+    if raw["project"] != PROJECT or raw["geometry_source"] != GEOMETRY_SOURCE:
+        raise ValueError("configuration names the wrong project or geometry authority")
+    if (
+        raw["rule_count_active"] != 9
+        or raw["rule_dim_total"] != authority.RULE_DIM
+        or raw["unused_rule_index"] != authority.UNUSED_RULE_INDEX
+    ):
+        raise ValueError("rule dimensions differ from the authority")
+    if raw["train_speed_mps"] != dict(authority.TRAIN_SPEED_MPS):
+        raise ValueError("train_speed_mps differs from the authority")
+    if raw["train_speed_scalar"] != dict(authority.TRAIN_SPEED_SCALAR):
+        raise ValueError("train_speed_scalar differs from the authority")
+    if raw["target_long_medium_steps"] != authority.TARGET_LONG_MEDIUM_STEPS:
+        raise ValueError("target_long_medium_steps differs from the authority")
+    if timing != {
+        "dt_seconds": authority.DT_S,
+        "stable_steps": authority.STABLE_STEPS,
+        "delay_steps": [25, 50, 75],
+        "hold_steps": authority.FINAL_HOLD_STEPS,
+        "prepare_steps": authority.PREPARE_STEPS,
+    }:
+        raise ValueError("canonical timing differs from the frozen contract")
+    return GeometryConfig(
+        project=PROJECT,
+        geometry_source=GEOMETRY_SOURCE,
+        target_long_medium_steps=authority.TARGET_LONG_MEDIUM_STEPS,
+        dt_seconds=authority.DT_S,
+        stable_steps=authority.STABLE_STEPS,
+        delay_steps=(25, 50, 75),
+        hold_steps=authority.FINAL_HOLD_STEPS,
+        prepare_steps=authority.PREPARE_STEPS,
+        stroke_jitter_fraction=0.0,
+        stroke_jitter_copies=0,
+        stroke_jitter_seed=42,
+        validation_delay_steps=50,
+        validation_seed=1042,
+        validation_network_noise=False,
+        timing_mode=CANONICAL_TIMING_MODE,
+        geometry_variant=CANONICAL_GEOMETRY_VARIANT,
+        canonical_speed_name="slow",
+        canonical_simple_intervals=150,
+        canonical_compound_intervals=200,
+        canonical_move_intervals=150,
+        canonical_transition_intervals=20,
+        canonical_trim_ratio=0.1,
+        canonical_bezier_reference_samples=10001,
+    )
 
 
 def load_geometry_config(path: str | Path) -> GeometryConfig:
@@ -121,6 +264,8 @@ def load_geometry_config(path: str | Path) -> GeometryConfig:
         "checkpoint_validation",
     }
     timing_mode = str(raw.get("timing_mode", LEGACY_TIMING_MODE))
+    if timing_mode == CANONICAL_TIMING_MODE:
+        return _load_canonical_geometry_config(raw)
     if timing_mode == LEGACY_TIMING_MODE:
         expected_keys = legacy_keys | ({"timing_mode"} if "timing_mode" in raw else set())
     elif timing_mode == FIXED_DURATION_TIMING_MODE:
@@ -314,6 +459,12 @@ def _global_character_span(config: GeometryConfig) -> np.ndarray:
 def stroke_conditions(
     config: GeometryConfig, *, include_jitter: bool
 ) -> tuple[StrokeCondition, ...]:
+    if config.timing_mode == CANONICAL_TIMING_MODE:
+        if include_jitter:
+            raise ValueError("canonical stroke conditions forbid jitter")
+        from hanzi_writing.canonical_protocol import canonical_stroke_conditions
+
+        return canonical_stroke_conditions(config)
     occurrences = authority.primitive_occurrences(_characters(config))
     starts = exact_rule_starts(config)
     rng = np.random.default_rng(config.stroke_jitter_seed)
@@ -355,6 +506,8 @@ def stroke_conditions(
 def move_conditions(
     config: GeometryConfig, *, include_jitter: bool
 ) -> tuple[MoveCondition, ...]:
+    if config.timing_mode == CANONICAL_TIMING_MODE and include_jitter:
+        raise ValueError("canonical move conditions forbid jitter")
     records = authority.move_training_conditions(_characters(config))
     output = []
     for record in records:
@@ -382,9 +535,10 @@ def training_conditions_by_rule(
     grouped: dict[str, list[StrokeCondition | MoveCondition]] = {
         rule: [] for rule in ACTIVE_RULES
     }
-    for condition in stroke_conditions(config, include_jitter=True):
+    include_jitter = config.timing_mode != CANONICAL_TIMING_MODE
+    for condition in stroke_conditions(config, include_jitter=include_jitter):
         grouped[condition.rule].append(condition)
-    grouped["move"].extend(move_conditions(config, include_jitter=True))
+    grouped["move"].extend(move_conditions(config, include_jitter=include_jitter))
     if any(not values for values in grouped.values()):
         raise RuntimeError("every active rule must have training conditions")
     return {rule: tuple(values) for rule, values in grouped.items()}
@@ -425,6 +579,7 @@ def build_component_trajectory(
     dwell_exit_index = None
     corner_xy_m = None
     movement_subphase = None
+    canonical_rounding = None
     if timing_mode == LEGACY_TIMING_MODE:
         base_intervals = authority.intervals_for_length(dense_length, speed)
         points = authority.resample_by_arclength(dense, base_intervals)
@@ -446,6 +601,18 @@ def build_component_trajectory(
             movement_subphase = tuple(str(value) for value in fixed["movement_subphase"])
         else:
             points = authority.resample_by_arclength(dense, base_intervals)
+    elif timing_mode == CANONICAL_TIMING_MODE:
+        if geometry_config is None:
+            raise RuntimeError("canonical trajectory requires a geometry config")
+        if speed_name != geometry_config.canonical_speed_name:
+            raise ValueError("canonical trajectories require the frozen slow cue")
+        from hanzi_writing.canonical_protocol import canonical_target_trajectory
+
+        canonical = canonical_target_trajectory(condition, geometry_config)
+        points = np.asarray(canonical["points_m"], dtype=np.float64)
+        base_intervals = len(points) - 1
+        movement_subphase = tuple(str(value) for value in canonical["subphase"])
+        canonical_rounding = canonical.get("rounding")
     else:
         raise RuntimeError(f"unhandled timing mode: {timing_mode}")
     intervals = len(points) - 1
@@ -477,6 +644,7 @@ def build_component_trajectory(
         dwell_exit_index=dwell_exit_index,
         corner_xy_m=corner_xy_m,
         movement_subphase=movement_subphase,
+        canonical_rounding=canonical_rounding,
     )
 
 

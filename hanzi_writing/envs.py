@@ -12,6 +12,7 @@ from motornet import environment as env
 
 from hanzi_writing import hanzi_geometry_final as authority
 from hanzi_writing.geometry import (
+    CANONICAL_TIMING_MODE,
     ComponentTrajectory,
     GeometryConfig,
     MoveCondition,
@@ -98,7 +99,11 @@ class _HanziEnvironment(env.Environment):
         action = action if th.is_tensor(action) else th.tensor(action, dtype=th.float32)
         action = action.to(self.device)
         self.effector.step(action, **kwargs)
-        obs = self.get_obs(t, action=action)
+        obs = self.get_obs(
+            t,
+            action=action,
+            deterministic=self.geometry_config.timing_mode == CANONICAL_TIMING_MODE,
+        )
         reward = None if self.differentiable else np.zeros((action.shape[0], 1))
         terminated = bool(t >= self.max_ep_duration)
         self.hidden_goal = self._target_at(t)
@@ -267,6 +272,8 @@ class HanziCharacterEnv(_HanziEnvironment):
     ) -> tuple[Any, dict[str, Any]]:
         if not testing:
             raise ValueError("complete characters are validation-only")
+        if self.geometry_config.timing_mode == CANONICAL_TIMING_MODE:
+            raise ValueError("canonical single-task geometry forbids complete characters")
         self._set_generator(seed=seed)
         options = {} if options is None else options
         character_name = str(options.get("character"))

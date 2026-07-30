@@ -1,0 +1,69 @@
+{
+  "project": "hanzi_stroke_temporal_composition",
+  "run_kind": "canonical_single_task_overfit",
+  "variant": "canonical_single_duration_overfit_v1",
+  "timing_mode": "canonical_fixed_duration",
+  "geometry_variant": "canonical_tangent_rounded_v1",
+  "enabled": true,
+  "seed": 42,
+  "validation_seed": 1042,
+  "device": "cpu",
+  "geometry_config": "configurations/hanzi_stroke_temporal_composition_canonical_geometry.json",
+  "active_rules": ["heng", "shu", "pie", "na", "dian", "ti", "hengzhe", "shugou", "move"],
+  "rule_dim_total": 10,
+  "unused_rule_index": 9,
+  "model": {
+    "network": "rnn",
+    "input_size": 28,
+    "hidden_size": 256,
+    "output_size": 6,
+    "activation": "softplus",
+    "recurrent_noise_std": 0.1,
+    "input_noise_std": 0.01,
+    "constrained": false,
+    "rnn_dt_ms": 10,
+    "rnn_tau_ms": 20,
+    "batch_first": true
+  },
+  "optimizer": {
+    "name": "Adam",
+    "learning_rate": 0.001,
+    "grad_clip_norm": 1.0
+  },
+  "training": {
+    "batch_size": 1,
+    "max_updates": 5000,
+    "validation_interval": 250,
+    "log_interval": 100,
+    "speed_name": "slow",
+    "delay_steps": [25, 50, 75],
+    "delay_sampler": "seeded_random_choice_legacy_grid",
+    "network_noise": false,
+    "deterministic_observation": true,
+    "stroke_sampler": "repeat_one_canonical_exact_condition",
+    "move_sampler": "deterministic_round_robin_12_exact_conditions"
+  },
+  "position_loss": {
+    "type": "phase_normalized_l1",
+    "stable_weight": 0.1,
+    "delay_weight": 0.1,
+    "movement_weight": 0.6,
+    "hold_weight": 0.2
+  },
+  "regularization": {
+    "l1_rate": 0.001,
+    "l1_weight": 0.001,
+    "l1_muscle_act": 0.01,
+    "simple_dynamics_weight": 0.001
+  },
+  "diagnostic_contract": {
+    "metrics_rows": 40,
+    "best_trajectory_rows": 3120,
+    "plots": 9,
+    "behavioral_pass_fail": "not_defined",
+    "complete_character_rollout": false
+  },
+  "output": {
+    "directory": "runs/hanzi_stroke_temporal_composition/canonical_single_task_overfit/dev42"
+  }
+}

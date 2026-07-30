@@ -1,0 +1,46 @@
+{
+  "project": "hanzi_stroke_temporal_composition",
+  "geometry_source": "hanzi_writing/hanzi_geometry_final.py",
+  "rule_count_active": 9,
+  "rule_dim_total": 10,
+  "unused_rule_index": 9,
+  "target_long_medium_steps": 85,
+  "train_speed_mps": {
+    "fast": 0.5,
+    "medium": 0.25,
+    "slow": 0.16666666666666666
+  },
+  "train_speed_scalar": {
+    "fast": 0.6666666666666666,
+    "medium": 0.3333333333333333,
+    "slow": 0.0
+  },
+  "timing_mode": "canonical_fixed_duration",
+  "geometry_variant": "canonical_tangent_rounded_v1",
+  "timing": {
+    "dt_seconds": 0.01,
+    "stable_steps": 25,
+    "delay_steps": [25, 50, 75],
+    "hold_steps": 25,
+    "prepare_steps": 25
+  },
+  "canonical_conditions": {
+    "stroke_rules": ["heng", "shu", "pie", "na", "dian", "ti", "hengzhe", "shugou"],
+    "stroke_selection": "maximum_physical_arc_length_then_character_stroke_condition",
+    "moves": "all_12_exact_transitions",
+    "speed_name": "slow",
+    "simple_stroke_intervals": 150,
+    "compound_stroke_intervals": 200,
+    "move_intervals": 150,
+    "transition_intervals": 20,
+    "trim_ratio": 0.1,
+    "bezier_reference_samples": 10001
+  },
+  "checkpoint_validation": {
+    "delay_steps": 50,
+    "validation_seed": 1042,
+    "network_noise": false,
+    "deterministic_observation": true,
+    "aggregation": "single_condition_or_equal_12_moves"
+  }
+}

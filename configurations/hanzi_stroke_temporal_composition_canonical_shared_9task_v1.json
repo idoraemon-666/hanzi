@@ -1,0 +1,24 @@
+{
+  "project": "hanzi_stroke_temporal_composition",
+  "run_kind": "canonical_shared_9task",
+  "variant": "canonical_shared_9task_v1",
+  "timing_mode": "canonical_fixed_duration",
+  "geometry_variant": "canonical_tangent_rounded_v1",
+  "enabled": false,
+  "seed": 42,
+  "validation_seed": 1042,
+  "device": "cpu",
+  "geometry_config": "configurations/hanzi_stroke_temporal_composition_canonical_geometry.json",
+  "active_rules": ["heng", "shu", "pie", "na", "dian", "ti", "hengzhe", "shugou", "move"],
+  "training": {
+    "batch_size": 32,
+    "max_updates": 10000,
+    "speed_name": "slow",
+    "delay_steps": [25, 50, 75],
+    "delay_sampler": "seeded_random_choice_legacy_grid",
+    "network_noise": false,
+    "deterministic_observation": true,
+    "sampler": "uniform_rule_then_uniform_move_condition"
+  },
+  "authorization": "requires_explicit_user_approval_after_stage1_review"
+}
