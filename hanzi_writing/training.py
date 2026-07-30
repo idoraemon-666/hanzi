@@ -248,6 +248,11 @@ def _hp_from_config(config: dict[str, Any]) -> dict[str, Any]:
     optimizer = config["optimizer"]
     training = config["training"]
     regularization = config["regularization"]
+    configured_updates = training.get(
+        "max_updates", training.get("initial_review_updates")
+    )
+    if configured_updates is None:
+        raise ValueError("training updates or initial review updates are missing")
     return {
         "network": model["network"],
         "inp_size": model["input_size"],
@@ -262,7 +267,7 @@ def _hp_from_config(config: dict[str, Any]) -> dict[str, Any]:
         "lr": optimizer["learning_rate"],
         "grad_clip_norm": optimizer["grad_clip_norm"],
         "batch_size": training["batch_size"],
-        "epochs": training["max_updates"],
+        "epochs": configured_updates,
         "save_iter": training["validation_interval"],
         **regularization,
         "seed": config["seed"],

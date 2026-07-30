@@ -229,7 +229,7 @@ def load_canonical_overfit_config(path: str | Path) -> tuple[dict[str, Any], Geo
         raise ValueError("canonical optimizer differs from the frozen baseline")
     if config["training"] != {
         "batch_size": 1,
-        "max_updates": 5000,
+        "initial_review_updates": 6000,
         "validation_interval": 250,
         "log_interval": 100,
         "speed_name": "slow",
@@ -473,14 +473,126 @@ def canonical_readonly_validation(
     }
 
 
+def _atomic_torch_save(value: object, path: Path) -> None:
+    temporary = path.with_name(f"{path.name}.tmp")
+    torch.save(value, temporary)
+    temporary.replace(path)
+
+
+def _continuation_payload(
+    policy,
+    optimizer,
+    hp: dict[str, Any],
+    update: int,
+    validation_loss: float,
+    task: str,
+    checkpoint_kind: str,
+    env: HanziComponentEnv,
+    losses: list[float],
+    log_interval: int,
+) -> dict[str, Any]:
+    tail_length = max(log_interval - 1, 0)
+    payload = _checkpoint_payload(
+        policy, optimizer, hp, update, validation_loss
+    )
+    payload.update(
+        {
+            "project": PROJECT,
+            "checkpoint_kind": checkpoint_kind,
+            "task": task,
+            "continuation_state": {
+                "next_update": update + 1,
+                "loss_tail": losses[-tail_length:] if tail_length else [],
+                "environment_rng_states": [
+                    {"kind": kind, "state": state, "path": path}
+                    for _, kind, state, path in _environment_generator_states(env)
+                ],
+            },
+        }
+    )
+    if not payload["continuation_state"]["environment_rng_states"]:
+        raise RuntimeError("canonical continuation environment RNG state is empty")
+    return payload
+
+
+def _restore_continuation_state(
+    checkpoint: dict[str, Any],
+    policy,
+    optimizer,
+    env: HanziComponentEnv,
+    hp: dict[str, Any],
+    task: str,
+) -> tuple[int, list[float]]:
+    if (
+        checkpoint.get("project") != PROJECT
+        or checkpoint.get("variant") != CANONICAL_VARIANT
+        or checkpoint.get("checkpoint_kind")
+        != "canonical_single_task_continuation"
+        or checkpoint.get("task") != task
+        or not _nested_equal(checkpoint.get("hp"), hp)
+    ):
+        raise ValueError("canonical continuation checkpoint identity differs")
+    policy.load_state_dict(checkpoint["agent_state_dict"])
+    optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+    rng_state = checkpoint.get("rng_state")
+    if not isinstance(rng_state, dict) or set(rng_state) != {
+        "python",
+        "numpy",
+        "torch",
+    }:
+        raise ValueError("canonical continuation global RNG state differs")
+    random.setstate(rng_state["python"])
+    np.random.set_state(rng_state["numpy"])
+    torch.set_rng_state(rng_state["torch"])
+    continuation = checkpoint.get("continuation_state")
+    if not isinstance(continuation, dict) or set(continuation) != {
+        "next_update",
+        "loss_tail",
+        "environment_rng_states",
+    }:
+        raise ValueError("canonical continuation state differs")
+    expected_states = {
+        path: (generator, kind)
+        for generator, kind, _, path in _environment_generator_states(env)
+    }
+    saved_states = continuation["environment_rng_states"]
+    if (
+        not isinstance(saved_states, list)
+        or {entry.get("path") for entry in saved_states} != set(expected_states)
+    ):
+        raise ValueError("canonical continuation environment RNG paths differ")
+    for entry in saved_states:
+        generator, kind = expected_states[entry["path"]]
+        if entry.get("kind") != kind:
+            raise ValueError("canonical continuation environment RNG kinds differ")
+        _restore_generator_state(generator, kind, entry["state"])
+    next_update = continuation["next_update"]
+    loss_tail = continuation["loss_tail"]
+    if (
+        not isinstance(next_update, int)
+        or next_update != checkpoint.get("update", -2) + 1
+        or not isinstance(loss_tail, list)
+        or not all(np.isfinite(float(value)) for value in loss_tail)
+    ):
+        raise ValueError("canonical continuation update or loss tail differs")
+    return next_update, [float(value) for value in loss_tail]
+
+
 def _train_task(
     task: str,
     conditions: tuple[StrokeCondition | MoveCondition, ...],
     config: dict[str, Any],
     geometry: GeometryConfig,
     output: Path,
+    target_updates: int | None = None,
 ) -> dict[str, Any]:
-    output.mkdir(parents=False, exist_ok=False)
+    training = config["training"]
+    if target_updates is None:
+        target_updates = training["initial_review_updates"]
+    if not isinstance(target_updates, int) or isinstance(target_updates, bool):
+        raise ValueError("canonical target updates must be an integer")
+    if target_updates < 1:
+        raise ValueError("canonical target updates must be positive")
     random.seed(config["seed"])
     np.random.seed(config["seed"])
     torch.manual_seed(config["seed"])
@@ -492,12 +604,77 @@ def _train_task(
         geometry_config_path=config["geometry_config"],
         action_frame_stacking=0,
     )
-    losses: list[float] = []
-    best_validation = np.inf
-    best_update = None
-    training = config["training"]
     best_path = output / "best_checkpoint.pt"
-    for update in range(training["max_updates"]):
+    continuation_path = output / "continuation_checkpoint.pt"
+    review_path = output / "review_checkpoint.pt"
+    if output.exists():
+        if not continuation_path.is_file():
+            raise FileExistsError(
+                "canonical task directory exists without a continuation checkpoint"
+            )
+        env.reset(
+            seed=config["seed"],
+            options={
+                "conditions": (conditions[0],),
+                "speed_name": training["speed_name"],
+                "delay_steps": geometry.validation_delay_steps,
+                "deterministic": True,
+            },
+        )
+        continuation_checkpoint = torch.load(
+            continuation_path,
+            map_location=torch.device("cpu"),
+            weights_only=False,
+        )
+        start_update, losses = _restore_continuation_state(
+            continuation_checkpoint, policy, optimizer, env, hp, task
+        )
+        if not best_path.is_file():
+            raise FileNotFoundError("canonical best checkpoint is missing")
+        best_checkpoint = torch.load(
+            best_path, map_location=torch.device("cpu"), weights_only=False
+        )
+        if (
+            best_checkpoint.get("project") != PROJECT
+            or best_checkpoint.get("variant") != CANONICAL_VARIANT
+            or best_checkpoint.get("checkpoint_kind")
+            != "canonical_single_task_best"
+            or best_checkpoint.get("task") != task
+        ):
+            raise ValueError("canonical best checkpoint identity differs")
+        best_validation = float(best_checkpoint["validation_loss"])
+        best_update = int(best_checkpoint["update"])
+    else:
+        output.mkdir(parents=False, exist_ok=False)
+        losses = []
+        best_validation = np.inf
+        best_update = None
+        start_update = 0
+    if start_update > target_updates:
+        raise ValueError("canonical target updates precede the continuation checkpoint")
+    if start_update == target_updates and review_path.is_file():
+        review_checkpoint = torch.load(
+            review_path, map_location=torch.device("cpu"), weights_only=False
+        )
+        if (
+            review_checkpoint.get("checkpoint_kind")
+            != "canonical_single_task_review"
+            or review_checkpoint.get("task") != task
+            or review_checkpoint.get("update") != target_updates - 1
+        ):
+            raise ValueError("canonical review checkpoint identity differs")
+        return {
+            "task": task,
+            "best_update": best_update,
+            "best_validation_loss": float(best_validation),
+            "review_update": target_updates - 1,
+            "review_validation_loss": float(
+                review_checkpoint["validation_loss"]
+            ),
+            "resumed_from_update": start_update,
+            "target_updates": target_updates,
+        }
+    for update in range(start_update, target_updates):
         condition = _condition_for_update(task, conditions, update)
         delay_steps = random.choice(geometry.delay_steps)
         result = _rollout(
@@ -565,43 +742,75 @@ def _train_task(
                         "task": task,
                     }
                 )
-                torch.save(payload, best_path)
-    final_readonly = canonical_readonly_validation(
-        policy, optimizer, env, hp, conditions, geometry, (best_path,)
+                _atomic_torch_save(payload, best_path)
+            continuation_payload = _continuation_payload(
+                policy,
+                optimizer,
+                hp,
+                update,
+                value,
+                task,
+                "canonical_single_task_continuation",
+                env,
+                losses,
+                training["log_interval"],
+            )
+            _atomic_torch_save(continuation_payload, continuation_path)
+    review_readonly = canonical_readonly_validation(
+        policy,
+        optimizer,
+        env,
+        hp,
+        conditions,
+        geometry,
+        (best_path, continuation_path),
     )
-    final_value = final_readonly["validation"]["aggregate"][
+    review_value = review_readonly["validation"]["aggregate"][
         "phase_normalized_position_l1"
     ]
     _append_jsonl(
         output / "validation_metrics.jsonl",
         {
-            "update": training["max_updates"] - 1,
-            "validation_kind": "final_read_only",
-            **final_readonly["validation"],
+            "update": target_updates - 1,
+            "validation_kind": "review_read_only",
+            **review_readonly,
         },
     )
-    payload = _checkpoint_payload(
+    continuation_payload = _continuation_payload(
         policy,
         optimizer,
         hp,
-        training["max_updates"] - 1,
-        final_value,
+        target_updates - 1,
+        review_value,
+        task,
+        "canonical_single_task_continuation",
+        env,
+        losses,
+        training["log_interval"],
     )
-    payload.update(
-        {
-            "project": PROJECT,
-            "checkpoint_kind": "canonical_single_task_final",
-            "task": task,
-        }
+    _atomic_torch_save(continuation_payload, continuation_path)
+    review_payload = _continuation_payload(
+        policy,
+        optimizer,
+        hp,
+        target_updates - 1,
+        review_value,
+        task,
+        "canonical_single_task_review",
+        env,
+        losses,
+        training["log_interval"],
     )
-    torch.save(payload, output / "final_checkpoint.pt")
+    _atomic_torch_save(review_payload, review_path)
     return {
         "task": task,
         "best_update": best_update,
         "best_validation_loss": float(best_validation),
-        "final_update": training["max_updates"] - 1,
-        "final_validation_loss": float(final_value),
-        "final_validation_read_only_checks": final_readonly["read_only_checks"],
+        "review_update": target_updates - 1,
+        "review_validation_loss": float(review_value),
+        "review_validation_read_only_checks": review_readonly["read_only_checks"],
+        "resumed_from_update": start_update,
+        "target_updates": target_updates,
     }
 
 
@@ -610,7 +819,7 @@ def _load_task_checkpoint(path: Path, task: str, checkpoint_name: str):
     expected_kind = (
         "canonical_single_task_best"
         if checkpoint_name == "best"
-        else "canonical_single_task_final"
+        else "canonical_single_task_review"
     )
     if (
         checkpoint.get("project") != PROJECT
@@ -832,7 +1041,7 @@ def _plot_moves(path: Path, curves: list[dict[str, Any]]) -> None:
 
 def _write_plots(output: Path, curves: list[dict[str, Any]]) -> list[Path]:
     plot_directory = output / "plots"
-    plot_directory.mkdir(exist_ok=False)
+    plot_directory.mkdir(exist_ok=True)
     best = [curve for curve in curves if curve["row"]["checkpoint"] == "best"]
     strokes = [curve for curve in best if curve["row"]["category"] == "stroke"]
     moves = [curve for curve in best if curve["row"]["category"] == "move"]
@@ -851,7 +1060,7 @@ def _format_metric(value: Any) -> str:
 
 def _write_report(path: Path, rows: list[dict[str, Any]]) -> None:
     best = [row for row in rows if row["checkpoint"] == "best"]
-    final = [row for row in rows if row["checkpoint"] == "final"]
+    review = [row for row in rows if row["checkpoint"] == "review"]
     lines = [
         "# Canonical single-task overfit report",
         "",
@@ -916,13 +1125,13 @@ def _write_report(path: Path, rows: list[dict[str, Any]]) -> None:
             f"min condition={minimum['condition_id']}; "
             f"max condition={maximum['condition_id']}."
         )
-    final_by_key = {(row["task"], row["condition_id"]): row for row in final}
-    lines.extend(["", "## Best versus final", ""])
+    review_by_key = {(row["task"], row["condition_id"]): row for row in review}
+    lines.extend(["", "## Best versus current review", ""])
     for task in ACTIVE_RULES:
         task_best = [row for row in best if row["task"] == task]
         differences = np.asarray(
             [
-                float(final_by_key[(task, row["condition_id"])]["movement_mean_euclidean_m"])
+                float(review_by_key[(task, row["condition_id"])]["movement_mean_euclidean_m"])
                 - float(row["movement_mean_euclidean_m"])
                 for row in task_best
             ]
@@ -934,7 +1143,7 @@ def _write_report(path: Path, rows: list[dict[str, Any]]) -> None:
                 f"min={differences.min():+.9g}, median={np.median(differences):+.9g}, "
                 f"mean={differences.mean():+.9g}, max={differences.max():+.9g} m"
             )
-        lines.append(f"- {task}: final-best movement mean error {summary}.")
+        lines.append(f"- {task}: review-best movement mean error {summary}.")
     lines.extend(
         [
             "",
@@ -980,7 +1189,7 @@ def require_approved_stage0(
     return approved_hashes
 
 
-def run_canonical_single_task_overfit(
+def prepare_canonical_single_task_overfit(
     config_path: str | Path,
     approved_stage0_directory: str | Path,
 ) -> dict[str, Any]:
@@ -995,15 +1204,125 @@ def run_canonical_single_task_overfit(
     )
     model_root = output / "models"
     model_root.mkdir(exist_ok=False)
+    return {
+        "output_directory": str(output),
+        "stage0": stage0,
+        "approved_stage0_sha256": approved_stage0_sha256,
+        "initial_review_updates": config["training"]["initial_review_updates"],
+        "parallel_task_count": len(_task_conditions(geometry)),
+    }
+
+
+def train_canonical_task_to_review(
+    config_path: str | Path,
+    task: str,
+    target_updates: int,
+) -> dict[str, Any]:
+    config, geometry = load_canonical_overfit_config(config_path)
+    validate_frozen_shared_config(
+        "configurations/hanzi_stroke_temporal_composition_canonical_shared_9task_v1.json"
+    )
+    task_conditions = dict(_task_conditions(geometry))
+    if task not in task_conditions:
+        raise ValueError(f"unknown canonical single task: {task}")
+    output = Path(config["output"]["directory"])
+    for name in STAGE0_ARTIFACT_NAMES:
+        if not (output / name).is_file():
+            raise FileNotFoundError(f"prepared canonical Stage-0 artifact is missing: {name}")
+    model_root = output / "models"
+    if not model_root.is_dir():
+        raise FileNotFoundError("prepared canonical model root is missing")
+    return _train_task(
+        task,
+        task_conditions[task],
+        config,
+        geometry,
+        model_root / task,
+        target_updates=target_updates,
+    )
+
+
+def _task_summary_from_artifacts(task: str, output: Path) -> dict[str, Any]:
+    best = torch.load(
+        output / "best_checkpoint.pt",
+        map_location=torch.device("cpu"),
+        weights_only=False,
+    )
+    review = torch.load(
+        output / "review_checkpoint.pt",
+        map_location=torch.device("cpu"),
+        weights_only=False,
+    )
+    continuation = torch.load(
+        output / "continuation_checkpoint.pt",
+        map_location=torch.device("cpu"),
+        weights_only=False,
+    )
+    checkpoints = (best, review, continuation)
+    if (
+        best.get("checkpoint_kind") != "canonical_single_task_best"
+        or review.get("checkpoint_kind") != "canonical_single_task_review"
+        or continuation.get("checkpoint_kind")
+        != "canonical_single_task_continuation"
+        or any(value.get("project") != PROJECT for value in checkpoints)
+        or any(value.get("variant") != CANONICAL_VARIANT for value in checkpoints)
+        or any(value.get("task") != task for value in checkpoints)
+        or review.get("update") != continuation.get("update")
+        or (continuation.get("continuation_state") or {}).get("next_update")
+        != review.get("update", -2) + 1
+    ):
+        raise ValueError(f"canonical task checkpoint identities differ: {task}")
+    validation_rows = []
+    with (output / "validation_metrics.jsonl").open(encoding="utf-8") as handle:
+        for line in handle:
+            row = json.loads(line)
+            if row.get("validation_kind") == "review_read_only":
+                validation_rows.append(row)
+    read_only_checks = (
+        validation_rows[-1].get("read_only_checks", {})
+        if validation_rows
+        else {}
+    )
+    if (
+        not validation_rows
+        or validation_rows[-1].get("update") != review.get("update")
+        or not isinstance(read_only_checks, dict)
+        or not read_only_checks
+        or not all(read_only_checks.values())
+    ):
+        raise ValueError(f"canonical review validation evidence differs: {task}")
+    return {
+        "task": task,
+        "best_update": int(best["update"]),
+        "best_validation_loss": float(best["validation_loss"]),
+        "review_update": int(review["update"]),
+        "review_validation_loss": float(review["validation_loss"]),
+        "review_validation_read_only_checks": read_only_checks,
+        "completed_updates": int(review["update"]) + 1,
+    }
+
+
+def finalize_canonical_single_task_review(
+    config_path: str | Path,
+    approved_stage0_directory: str | Path,
+) -> dict[str, Any]:
+    config, geometry = load_canonical_overfit_config(config_path)
+    validate_frozen_shared_config(
+        "configurations/hanzi_stroke_temporal_composition_canonical_shared_9task_v1.json"
+    )
+    output = Path(config["output"]["directory"])
+    approved_stage0_sha256 = require_approved_stage0(
+        output, approved_stage0_directory
+    )
+    model_root = output / "models"
     task_summaries = []
     task_conditions = _task_conditions(geometry)
     for task, conditions in task_conditions:
-        task_summaries.append(
-            _train_task(task, conditions, config, geometry, model_root / task)
-        )
+        task_summaries.append(_task_summary_from_artifacts(task, model_root / task))
     expected_model_files = {
         "best_checkpoint.pt",
-        "final_checkpoint.pt",
+        "continuation_checkpoint.pt",
+        "review_checkpoint.pt",
         "training_metrics.jsonl",
         "validation_metrics.jsonl",
     }
@@ -1013,7 +1332,7 @@ def run_canonical_single_task_overfit(
             raise RuntimeError(f"canonical task output set differs: {task}")
     curves = []
     for task, conditions in task_conditions:
-        for checkpoint_name in ("best", "final"):
+        for checkpoint_name in ("best", "review"):
             curves.extend(
                 _checkpoint_curves(
                     task,
@@ -1047,8 +1366,15 @@ def run_canonical_single_task_overfit(
         str(path.relative_to(output)): _sha256_file(path)
         for path in sorted(model_root.glob("*/*_checkpoint.pt"))
     }
-    if len(checkpoint_sha256) != 18:
-        raise RuntimeError("canonical checkpoint count must equal 18")
+    if len(checkpoint_sha256) != 27:
+        raise RuntimeError("canonical checkpoint count must equal 27")
+    stage0 = {
+        "manifest": _load_json(output / "canonical_condition_manifest.json"),
+        "target_rows": EXPECTED_TARGET_ROWS,
+        "artifacts": [
+            str(output / name) for name in sorted(STAGE0_ARTIFACT_NAMES)
+        ],
+    }
     provenance = {
         "project": PROJECT,
         "variant": CANONICAL_VARIANT,
@@ -1066,6 +1392,9 @@ def run_canonical_single_task_overfit(
         "checkpoint_sha256": checkpoint_sha256,
         "stage0": stage0,
         "task_summaries": task_summaries,
+        "initial_review_updates": config["training"]["initial_review_updates"],
+        "update_cap": None,
+        "execution_mode": "nine_independent_parallel_processes",
         "integrity": {
             "single_tasks_completed": len(task_summaries),
             "metrics_rows": len(rows),
@@ -1086,11 +1415,32 @@ def run_canonical_single_task_overfit(
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True)
-    parser.add_argument("--approved-stage0", required=True)
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--prepare", action="store_true")
+    mode.add_argument("--task", choices=ACTIVE_RULES)
+    mode.add_argument("--finalize", action="store_true")
+    parser.add_argument("--approved-stage0")
+    parser.add_argument("--target-updates", type=int)
     arguments = parser.parse_args()
-    run_canonical_single_task_overfit(
-        arguments.config, arguments.approved_stage0
-    )
+    if arguments.prepare:
+        if arguments.approved_stage0 is None or arguments.target_updates is not None:
+            parser.error("--prepare requires --approved-stage0 and forbids --target-updates")
+        result = prepare_canonical_single_task_overfit(
+            arguments.config, arguments.approved_stage0
+        )
+    elif arguments.task is not None:
+        if arguments.approved_stage0 is not None or arguments.target_updates is None:
+            parser.error("--task requires --target-updates and forbids --approved-stage0")
+        result = train_canonical_task_to_review(
+            arguments.config, arguments.task, arguments.target_updates
+        )
+    else:
+        if arguments.approved_stage0 is None or arguments.target_updates is not None:
+            parser.error("--finalize requires --approved-stage0 and forbids --target-updates")
+        result = finalize_canonical_single_task_review(
+            arguments.config, arguments.approved_stage0
+        )
+    print(json.dumps(result, sort_keys=True), flush=True)
 
 
 if __name__ == "__main__":

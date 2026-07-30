@@ -5,8 +5,8 @@ if [[ $# -ne 4 ]]; then
   echo "Usage: bash server/run_hanzi_canonical_single_task_overfit.sh REPO ARCHIVE_BASE EXPECTED_HEAD APPROVED_STAGE0" >&2
   exit 2
 fi
-if [[ "${HANZI_TEMPORAL_COMPOSITION_AUTHORIZED_RUN:-}" != "canonical-single-duration-overfit-stage0-stage1" ]]; then
-  echo "STOP: explicit authorization for canonical Stage 0 and Stage 1 is required." >&2
+if [[ "${HANZI_TEMPORAL_COMPOSITION_AUTHORIZED_RUN:-}" != "canonical-single-duration-stage1-parallel6000" ]]; then
+  echo "STOP: explicit authorization for canonical Stage 1 parallel 6000-update review is required." >&2
   exit 2
 fi
 
@@ -16,6 +16,7 @@ EXPECTED_HEAD="$3"
 APPROVED_STAGE0="$(realpath "$4")"
 PYTHON=/root/autodl-tmp/conda/envs/hanzi-stroke-temporal-composition-cpu/bin/python
 SUBMODULE_HEAD=ac0c4f589eae37bbde63968912925de99232e306
+APPROVED_STAGE0_HEAD=2cf251ce828d6e50384a359dfa15d1de65c53726
 CONFIG_RELATIVE=configurations/hanzi_stroke_temporal_composition_canonical_single_task_overfit_v1.json
 SHARED_RELATIVE=configurations/hanzi_stroke_temporal_composition_canonical_shared_9task_v1.json
 OUTPUT_DIR="$REPO/runs/hanzi_stroke_temporal_composition/canonical_single_task_overfit/dev42"
@@ -54,7 +55,7 @@ set +e
     cd "$APPROVED_STAGE0"
     sha256sum -c SHA256SUMS
   )
-  APPROVED_STAGE0="$APPROVED_STAGE0" EXPECTED_HEAD="$EXPECTED_HEAD" \
+  APPROVED_STAGE0="$APPROVED_STAGE0" APPROVED_STAGE0_HEAD="$APPROVED_STAGE0_HEAD" \
     SUBMODULE_HEAD="$SUBMODULE_HEAD" "$PYTHON" - <<'PY'
 import json
 import os
@@ -65,7 +66,7 @@ with (root / "provenance.json").open(encoding="utf-8") as handle:
     provenance = json.load(handle)
 assert provenance["completed"] is True
 assert provenance["formal_stage0_completed"] is True
-assert provenance["git_head"] == os.environ["EXPECTED_HEAD"]
+assert provenance["git_head"] == os.environ["APPROVED_STAGE0_HEAD"]
 assert provenance["submodule_head"] == os.environ["SUBMODULE_HEAD"]
 assert provenance["target_rows"] == 3120
 assert provenance["canonical_stage1_started"] is False
@@ -94,10 +95,52 @@ PY
     tests.test_phase_normalized_loss \
     tests.test_hanzi_canonical_protocol \
     tests.test_hanzi_canonical_overfit
-  echo "CANONICAL_STAGE0_STAGE1_STARTED=1"
+  echo "CANONICAL_STAGE1_PARALLEL6000_STARTED=1"
   echo "CANONICAL_SHARED_9TASK_STARTED=0"
   "$PYTHON" -m hanzi_writing.canonical_overfit \
     --config "$CONFIG_RELATIVE" \
+    --prepare \
+    --approved-stage0 "$APPROVED_STAGE0"
+  TASKS=(heng shu pie na dian ti hengzhe shugou move)
+  WORKER_LOG_DIR="$OUTPUT_DIR/worker_logs"
+  mkdir "$WORKER_LOG_DIR"
+  WORKER_PIDS=()
+  terminate_workers() {
+    for pid in "${WORKER_PIDS[@]}"; do
+      kill -TERM "$pid" 2>/dev/null || true
+    done
+    wait 2>/dev/null || true
+  }
+  trap terminate_workers INT TERM EXIT
+  for task in "${TASKS[@]}"; do
+    "$PYTHON" -m hanzi_writing.canonical_overfit \
+      --config "$CONFIG_RELATIVE" \
+      --task "$task" \
+      --target-updates 6000 \
+      > "$WORKER_LOG_DIR/$task.log" 2>&1 &
+    WORKER_PIDS+=("$!")
+    echo "CANONICAL_TASK_LAUNCHED=$task PID=$!"
+  done
+  echo "CANONICAL_PARALLEL_WORKER_COUNT=${#WORKER_PIDS[@]}"
+  WORKER_FAILURE=0
+  for index in "${!WORKER_PIDS[@]}"; do
+    task="${TASKS[$index]}"
+    pid="${WORKER_PIDS[$index]}"
+    if wait "$pid"; then
+      echo "CANONICAL_TASK_COMPLETE=$task PID=$pid"
+    else
+      status="$?"
+      echo "CANONICAL_TASK_FAILED=$task PID=$pid EXIT=$status" >&2
+      WORKER_FAILURE=1
+    fi
+  done
+  trap - INT TERM EXIT
+  if [[ "$WORKER_FAILURE" -ne 0 ]]; then
+    exit 1
+  fi
+  "$PYTHON" -m hanzi_writing.canonical_overfit \
+    --config "$CONFIG_RELATIVE" \
+    --finalize \
     --approved-stage0 "$APPROVED_STAGE0"
 ) 2>&1 | tee "$LOG_TMP"
 RUN_CODES=("${PIPESTATUS[@]}")
@@ -105,12 +148,12 @@ set -e
 PROGRAM_EXIT="${RUN_CODES[0]}"
 TEE_EXIT="${RUN_CODES[1]}"
 if [[ "$PROGRAM_EXIT" -ne 0 || "$TEE_EXIT" -ne 0 ]]; then
-  echo "Canonical Stage 0/1 stopped; see $LOG_TMP" >&2
+  echo "Canonical Stage 1 parallel 6000-update review stopped; see $LOG_TMP and worker logs." >&2
   exit 1
 fi
 
 TEST_COUNT="$(sed -nE 's/^Ran ([0-9]+) tests? in .*/\1/p' "$LOG_TMP" | tail -n 1)"
-test "$TEST_COUNT" = 63
+test "$TEST_COUNT" = 65
 if grep -Eq '^OK \(.*skipped=[1-9][0-9]*.*\)$' "$LOG_TMP"; then
   echo "ABORT: skipped tests are forbidden" >&2
   exit 1
@@ -177,7 +220,8 @@ for row in rows:
 models = output / "models"
 expected_model_files = {
     "best_checkpoint.pt",
-    "final_checkpoint.pt",
+    "continuation_checkpoint.pt",
+    "review_checkpoint.pt",
     "training_metrics.jsonl",
     "validation_metrics.jsonl",
 }
@@ -186,12 +230,14 @@ assert {path.name for path in models.iterdir()} == {
 }
 for directory in models.iterdir():
     assert {path.name for path in directory.iterdir()} == expected_model_files
-    assert sum(1 for line in (directory / "training_metrics.jsonl").open()) == 50
+    assert sum(1 for line in (directory / "training_metrics.jsonl").open()) == 60
     validation_rows = [
         json.loads(line) for line in (directory / "validation_metrics.jsonl").open()
     ]
-    assert len(validation_rows) == 21
-    assert validation_rows[-1]["validation_kind"] == "final_read_only"
+    assert len(validation_rows) == 25
+    assert validation_rows[-1]["validation_kind"] == "review_read_only"
+    assert validation_rows[-1]["update"] == 5999
+    assert all(validation_rows[-1]["read_only_checks"].values())
 
 assert len(list((output / "plots").glob("*.png"))) == 9
 provenance_path = output / "provenance.json"
@@ -204,7 +250,13 @@ assert provenance["integrity"] == {
     "plots": 9,
     "single_tasks_completed": 9,
 }
-assert len(provenance["checkpoint_sha256"]) == 18
+assert len(provenance["checkpoint_sha256"]) == 27
+assert provenance["initial_review_updates"] == 6000
+assert provenance["update_cap"] is None
+assert provenance["execution_mode"] == "nine_independent_parallel_processes"
+assert {
+    summary["completed_updates"] for summary in provenance["task_summaries"]
+} == {6000}
 assert provenance["approved_stage0_directory"] == os.environ["APPROVED_STAGE0"]
 assert set(provenance["approved_stage0_sha256"]) == {
     "canonical_condition_manifest.json",
@@ -238,7 +290,7 @@ PY
 tar -C "$(dirname "$OUTPUT_DIR")" -czf "$ARCHIVE" "$(basename "$OUTPUT_DIR")"
 sha256sum "$ARCHIVE" > "$ARCHIVE_SHA"
 
-echo "CANONICAL_STAGE0_STAGE1_COMPLETE=1"
+echo "CANONICAL_STAGE1_PARALLEL6000_COMPLETE=1"
 echo "CANONICAL_SHARED_9TASK_STARTED=0"
 echo "FORMAL_75K_TRAINING_STARTED=0"
 echo "COMPLETE_CHARACTER_ROLLOUT_STARTED=0"

@@ -49,6 +49,10 @@ class CanonicalOverfitTests(unittest.TestCase):
     def setUp(self) -> None:
         self.config, self.geometry = load_canonical_overfit_config(OVERFIT_PATH)
 
+    def test_initial_review_is_6000_without_an_update_cap(self) -> None:
+        self.assertEqual(self.config["training"]["initial_review_updates"], 6000)
+        self.assertNotIn("max_updates", self.config["training"])
+
     def test_move_sampler_is_exact_round_robin(self) -> None:
         moves = move_conditions(self.geometry, include_jitter=False)
         first_cycle = [
@@ -123,10 +127,14 @@ class CanonicalOverfitTests(unittest.TestCase):
         script = SERVER_PATH.read_text(encoding="utf-8")
         stage0_script = STAGE0_SERVER_PATH.read_text(encoding="utf-8")
         self.assertIn(
-            "canonical-single-duration-overfit-stage0-stage1", script
+            "canonical-single-duration-stage1-parallel6000", script
         )
         self.assertIn("hanzi_writing.canonical_overfit", script)
         self.assertIn("--approved-stage0", script)
+        self.assertIn("--target-updates 6000", script)
+        self.assertIn("TASKS=(heng shu pie na dian ti hengzhe shugou move)", script)
+        self.assertIn('> "$WORKER_LOG_DIR/$task.log" 2>&1 &', script)
+        self.assertIn('CANONICAL_PARALLEL_WORKER_COUNT=${#WORKER_PIDS[@]}', script)
         self.assertIn("CANONICAL_SHARED_9TASK_STARTED=0", script)
         self.assertIn("canonical-single-duration-stage0-dev42", stage0_script)
         self.assertIn("hanzi_writing.canonical_protocol", stage0_script)
@@ -150,7 +158,11 @@ class CanonicalOverfitTests(unittest.TestCase):
     def test_one_update_single_task_smoke_writes_required_checkpoint_files(self) -> None:
         config = copy.deepcopy(self.config)
         config["training"].update(
-            {"max_updates": 1, "validation_interval": 1, "log_interval": 1}
+            {
+                "initial_review_updates": 1,
+                "validation_interval": 1,
+                "log_interval": 1,
+            }
         )
         condition = (canonical_stroke_conditions(self.geometry)[0],)
         with tempfile.TemporaryDirectory() as parent:
@@ -159,16 +171,77 @@ class CanonicalOverfitTests(unittest.TestCase):
                 "heng", condition, config, self.geometry, output
             )
             self.assertEqual(summary["best_update"], 0)
-            self.assertEqual(summary["final_update"], 0)
+            self.assertEqual(summary["review_update"], 0)
             self.assertEqual(
                 {path.name for path in output.iterdir()},
                 {
                     "best_checkpoint.pt",
-                    "final_checkpoint.pt",
+                    "continuation_checkpoint.pt",
+                    "review_checkpoint.pt",
                     "training_metrics.jsonl",
                     "validation_metrics.jsonl",
                 },
             )
+
+    def test_task_resume_matches_uninterrupted_training_bitwise(self) -> None:
+        config = copy.deepcopy(self.config)
+        config["training"].update(
+            {
+                "initial_review_updates": 2,
+                "validation_interval": 1,
+                "log_interval": 1,
+            }
+        )
+        condition = (canonical_stroke_conditions(self.geometry)[0],)
+        with tempfile.TemporaryDirectory() as parent:
+            uninterrupted = Path(parent) / "uninterrupted"
+            resumed = Path(parent) / "resumed"
+            _train_task(
+                "heng",
+                condition,
+                config,
+                self.geometry,
+                uninterrupted,
+                target_updates=2,
+            )
+            _train_task(
+                "heng",
+                condition,
+                config,
+                self.geometry,
+                resumed,
+                target_updates=1,
+            )
+            summary = _train_task(
+                "heng",
+                condition,
+                config,
+                self.geometry,
+                resumed,
+                target_updates=2,
+            )
+            self.assertEqual(summary["resumed_from_update"], 1)
+            direct = torch.load(
+                uninterrupted / "review_checkpoint.pt",
+                map_location="cpu",
+                weights_only=False,
+            )
+            continued = torch.load(
+                resumed / "review_checkpoint.pt",
+                map_location="cpu",
+                weights_only=False,
+            )
+            self.assertEqual(direct["update"], 1)
+            self.assertEqual(continued["update"], 1)
+            for name, value in direct["agent_state_dict"].items():
+                self.assertTrue(torch.equal(value, continued["agent_state_dict"][name]))
+            training_rows = [
+                json.loads(line)
+                for line in (resumed / "training_metrics.jsonl").read_text(
+                    encoding="utf-8"
+                ).splitlines()
+            ]
+            self.assertEqual([row["update"] for row in training_rows], [0, 1])
 
 
 if __name__ == "__main__":
