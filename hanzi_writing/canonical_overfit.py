@@ -522,12 +522,14 @@ def _restore_continuation_state(
     env: HanziComponentEnv,
     hp: dict[str, Any],
     task: str,
+    expected_variant: str = CANONICAL_VARIANT,
+    checkpoint_prefix: str = "canonical_single_task",
 ) -> tuple[int, list[float]]:
     if (
         checkpoint.get("project") != PROJECT
-        or checkpoint.get("variant") != CANONICAL_VARIANT
+        or checkpoint.get("variant") != expected_variant
         or checkpoint.get("checkpoint_kind")
-        != "canonical_single_task_continuation"
+        != f"{checkpoint_prefix}_continuation"
         or checkpoint.get("task") != task
         or not _nested_equal(checkpoint.get("hp"), hp)
     ):
@@ -585,6 +587,9 @@ def _train_task(
     geometry: GeometryConfig,
     output: Path,
     target_updates: int | None = None,
+    initial_checkpoint_path: Path | None = None,
+    checkpoint_variant: str = CANONICAL_VARIANT,
+    checkpoint_prefix: str = "canonical_single_task",
 ) -> dict[str, Any]:
     training = config["training"]
     if target_updates is None:
@@ -627,7 +632,14 @@ def _train_task(
             weights_only=False,
         )
         start_update, losses = _restore_continuation_state(
-            continuation_checkpoint, policy, optimizer, env, hp, task
+            continuation_checkpoint,
+            policy,
+            optimizer,
+            env,
+            hp,
+            task,
+            checkpoint_variant,
+            checkpoint_prefix,
         )
         if not best_path.is_file():
             raise FileNotFoundError("canonical best checkpoint is missing")
@@ -636,9 +648,9 @@ def _train_task(
         )
         if (
             best_checkpoint.get("project") != PROJECT
-            or best_checkpoint.get("variant") != CANONICAL_VARIANT
+            or best_checkpoint.get("variant") != checkpoint_variant
             or best_checkpoint.get("checkpoint_kind")
-            != "canonical_single_task_best"
+            != f"{checkpoint_prefix}_best"
             or best_checkpoint.get("task") != task
         ):
             raise ValueError("canonical best checkpoint identity differs")
@@ -646,6 +658,37 @@ def _train_task(
         best_update = int(best_checkpoint["update"])
     else:
         output.mkdir(parents=False, exist_ok=False)
+        if initial_checkpoint_path is not None:
+            initial_checkpoint = torch.load(
+                initial_checkpoint_path,
+                map_location=torch.device("cpu"),
+                weights_only=False,
+            )
+            if (
+                initial_checkpoint.get("project") != PROJECT
+                or initial_checkpoint.get("variant") != CANONICAL_VARIANT
+                or initial_checkpoint.get("checkpoint_kind")
+                not in {
+                    "canonical_single_task_best",
+                    "canonical_single_task_review",
+                }
+                or initial_checkpoint.get("task") != task
+            ):
+                raise ValueError("canonical refinement source checkpoint differs")
+            policy.load_state_dict(initial_checkpoint["agent_state_dict"])
+            optimizer.load_state_dict(initial_checkpoint["optimizer_state_dict"])
+            for parameter_group in optimizer.param_groups:
+                parameter_group["lr"] = hp["lr"]
+            rng_state = initial_checkpoint.get("rng_state")
+            if not isinstance(rng_state, dict) or set(rng_state) != {
+                "python",
+                "numpy",
+                "torch",
+            }:
+                raise ValueError("canonical refinement source RNG state differs")
+            random.setstate(rng_state["python"])
+            np.random.set_state(rng_state["numpy"])
+            torch.set_rng_state(rng_state["torch"])
         losses = []
         best_validation = np.inf
         best_update = None
@@ -658,7 +701,7 @@ def _train_task(
         )
         if (
             review_checkpoint.get("checkpoint_kind")
-            != "canonical_single_task_review"
+            != f"{checkpoint_prefix}_review"
             or review_checkpoint.get("task") != task
             or review_checkpoint.get("update") != target_updates - 1
         ):
@@ -738,7 +781,7 @@ def _train_task(
                 payload.update(
                     {
                         "project": PROJECT,
-                        "checkpoint_kind": "canonical_single_task_best",
+                        "checkpoint_kind": f"{checkpoint_prefix}_best",
                         "task": task,
                     }
                 )
@@ -750,7 +793,7 @@ def _train_task(
                 update,
                 value,
                 task,
-                "canonical_single_task_continuation",
+                f"{checkpoint_prefix}_continuation",
                 env,
                 losses,
                 training["log_interval"],
@@ -783,7 +826,7 @@ def _train_task(
         target_updates - 1,
         review_value,
         task,
-        "canonical_single_task_continuation",
+        f"{checkpoint_prefix}_continuation",
         env,
         losses,
         training["log_interval"],
@@ -796,7 +839,7 @@ def _train_task(
         target_updates - 1,
         review_value,
         task,
-        "canonical_single_task_review",
+        f"{checkpoint_prefix}_review",
         env,
         losses,
         training["log_interval"],
@@ -814,16 +857,19 @@ def _train_task(
     }
 
 
-def _load_task_checkpoint(path: Path, task: str, checkpoint_name: str):
+def _load_task_checkpoint(
+    path: Path,
+    task: str,
+    checkpoint_name: str,
+    *,
+    expected_variant: str = CANONICAL_VARIANT,
+    checkpoint_prefix: str = "canonical_single_task",
+):
     checkpoint = torch.load(path, map_location=torch.device("cpu"), weights_only=False)
-    expected_kind = (
-        "canonical_single_task_best"
-        if checkpoint_name == "best"
-        else "canonical_single_task_review"
-    )
+    expected_kind = f"{checkpoint_prefix}_{checkpoint_name}"
     if (
         checkpoint.get("project") != PROJECT
-        or checkpoint.get("variant") != CANONICAL_VARIANT
+        or checkpoint.get("variant") != expected_variant
         or checkpoint.get("checkpoint_kind") != expected_kind
         or checkpoint.get("task") != task
     ):
@@ -904,8 +950,18 @@ def _checkpoint_curves(
     checkpoint_path: Path,
     config: dict[str, Any],
     geometry: GeometryConfig,
+    *,
+    checkpoint_identity_name: str | None = None,
+    expected_variant: str = CANONICAL_VARIANT,
+    checkpoint_prefix: str = "canonical_single_task",
 ) -> list[dict[str, Any]]:
-    policy, checkpoint = _load_task_checkpoint(checkpoint_path, task, checkpoint_name)
+    policy, checkpoint = _load_task_checkpoint(
+        checkpoint_path,
+        task,
+        checkpoint_identity_name or checkpoint_name,
+        expected_variant=expected_variant,
+        checkpoint_prefix=checkpoint_prefix,
+    )
     hp = checkpoint["hp"]
     env = HanziComponentEnv(
         effector=_make_effector(),

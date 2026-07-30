@@ -1,0 +1,35 @@
+{
+  "project": "hanzi_stroke_temporal_composition",
+  "run_kind": "canonical_stroke_refinement",
+  "variant": "canonical_stroke_refinement_v1",
+  "enabled": true,
+  "base_config": "configurations/hanzi_stroke_temporal_composition_canonical_single_task_overfit_v1.json",
+  "active_rules": ["heng", "shu", "pie", "na", "dian", "ti", "hengzhe", "shugou"],
+  "source_contract": {
+    "variant": "canonical_single_duration_overfit_v1",
+    "git_head": "6b2007b5ddd2ef914f98336007ec9d75463d97d5",
+    "completed_updates_per_task": 6000,
+    "selection_candidates": ["best_checkpoint.pt", "review_checkpoint.pt"],
+    "selection_metric": "validation_loss",
+    "selection_rule": "minimum_with_best_on_exact_tie"
+  },
+  "optimizer": {
+    "learning_rate": 0.0001,
+    "source_optimizer_state": "preserve_adam_state_then_override_learning_rate"
+  },
+  "training": {
+    "additional_updates": 2000,
+    "validation_interval": 100,
+    "log_interval": 100,
+    "parallel_processes": 8
+  },
+  "exclusions": {
+    "move": true,
+    "shared_9task": true,
+    "formal_75k": true,
+    "complete_character_rollout": true
+  },
+  "output": {
+    "directory": "runs/hanzi_stroke_temporal_composition/canonical_stroke_refinement/dev42"
+  }
+}
