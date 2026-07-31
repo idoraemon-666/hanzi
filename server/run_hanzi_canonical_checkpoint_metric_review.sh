@@ -59,7 +59,7 @@ if [[ "$PROGRAM_EXIT" -ne 0 || "$TEE_EXIT" -ne 0 ]]; then
 fi
 
 TEST_COUNT="$(sed -nE 's/^Ran ([0-9]+) tests? in .*/\1/p' "$LOG_TMP" | tail -n 1)"
-test "$TEST_COUNT" = 80
+test "$TEST_COUNT" = 108
 if grep -Eq '^OK \(.*skipped=[1-9][0-9]*.*\)$' "$LOG_TMP"; then
   echo "ABORT: skipped tests are forbidden" >&2
   exit 1
