@@ -1,0 +1,99 @@
+{
+  "project": "hanzi_stroke_temporal_composition",
+  "run_kind": "canonical_checkpoint_metric_review",
+  "variant": "canonical_checkpoint_metric_review_v1",
+  "enabled": true,
+  "tasks": ["heng", "shu", "pie", "na", "dian", "ti", "hengzhe", "shugou"],
+  "sources": [
+    {
+      "id": "stage1_lr1e3_6000",
+      "directory": "runs/hanzi_stroke_temporal_composition/canonical_single_task_overfit/dev42",
+      "metrics_file": "single_task_overfit_metrics.csv",
+      "variant": "canonical_single_duration_overfit_v1",
+      "git_head": "6b2007b5ddd2ef914f98336007ec9d75463d97d5",
+      "provenance_sha256": "f61a0b37daeab64bc7d6c28a0d253314273f114aa424f9815f48398dfbbfe821",
+      "expected_metrics_rows": 40,
+      "included_checkpoints": ["best", "review"],
+      "expected_filtered_rows": 16
+    },
+    {
+      "id": "refinement_lr1e4_2000",
+      "directory": "runs/hanzi_stroke_temporal_composition/canonical_stroke_refinement/dev42",
+      "metrics_file": "stroke_refinement_metrics.csv",
+      "variant": "canonical_stroke_refinement_v1",
+      "git_head": "d763b59ccc09d6e8673f518f0aead89094fb2226",
+      "provenance_sha256": "e6fb0ebb4f4faf1303665b80b81929ada470c3623b7d1e0db0bc6ff9158ce835",
+      "expected_metrics_rows": 24,
+      "included_checkpoints": ["best", "review"],
+      "expected_filtered_rows": 16
+    },
+    {
+      "id": "scratch_lr1e4_10000",
+      "directory": "runs/hanzi_stroke_temporal_composition/canonical_stroke_scratch_lr1e4_10000/dev42",
+      "metrics_file": "scratch_low_lr_metrics.csv",
+      "variant": "canonical_eight_stroke_scratch_lr1e4_v1",
+      "git_head": "c01afd9bf52be6ca907bc3ce634e921b5c640ec5",
+      "provenance_sha256": "a9ffd9f9e725e20e679934e5302f8538f6da9bd315dbfb2502be225d951ca02c",
+      "expected_metrics_rows": 16,
+      "included_checkpoints": ["best", "review"],
+      "expected_filtered_rows": 16
+    },
+    {
+      "id": "followup_lr1e4_total4000",
+      "directory": "runs/hanzi_stroke_temporal_composition/canonical_stroke_refinement_followup/dev42",
+      "metrics_file": "selected_followup_metrics.csv",
+      "variant": "canonical_selected_refinement_followup_v1",
+      "git_head": "c01afd9bf52be6ca907bc3ce634e921b5c640ec5",
+      "provenance_sha256": "2e13572fd392897ff54ce883ca070f7a5e8e4fcfb607f8b508f9fb700a48d76c",
+      "expected_metrics_rows": 12,
+      "included_checkpoints": ["best", "review"],
+      "expected_filtered_rows": 8
+    }
+  ],
+  "comparison": {
+    "all_task_metrics": [
+      "checkpoint_validation_loss",
+      "start_error_euclidean_m",
+      "movement_mean_euclidean_m",
+      "endpoint_euclidean_m",
+      "path_length_ratio_abs_error",
+      "max_euclidean_m"
+    ],
+    "compound_only_metrics": [
+      "pre_straight_mean_euclidean_m",
+      "transition_mean_euclidean_m",
+      "post_straight_mean_euclidean_m",
+      "transition_max_euclidean_m",
+      "exit_direction_error_deg"
+    ],
+    "metric_objective": "minimum",
+    "behavioral_pass_fail": "not_defined",
+    "automatic_checkpoint_selection": "none",
+    "manual_review_required": true
+  },
+  "integrity_contract": {
+    "source_count": 4,
+    "candidate_rows": 56,
+    "leader_rows": 58,
+    "candidates_per_task": {
+      "heng": 8,
+      "shu": 6,
+      "pie": 8,
+      "na": 8,
+      "dian": 6,
+      "ti": 6,
+      "hengzhe": 6,
+      "shugou": 8
+    }
+  },
+  "exclusions": {
+    "training": true,
+    "move": true,
+    "shared_9task": true,
+    "formal_75k": true,
+    "complete_character_rollout": true
+  },
+  "output": {
+    "directory": "runs/hanzi_stroke_temporal_composition/canonical_checkpoint_metric_review/dev42"
+  }
+}

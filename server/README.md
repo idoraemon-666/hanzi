@@ -18,6 +18,9 @@ The active branch is `hanzi_stroke_temporal_composition`. Its server files are:
   CPU runner for the eight fresh `1e-4`/10000-update stroke tasks and the four
   exact 2000-update refinement continuations. It excludes move and writes two
   isolated outputs and archives.
+- `run_hanzi_canonical_checkpoint_metric_review.sh`: verifies the four formal
+  canonical result sources and creates a threshold-free per-metric checkpoint
+  comparison. It never selects a checkpoint or starts training.
 
 Use the generated upload package and its short `RUN_AUDIT.sh` command instead of
 manually reconstructing the repository or pasting a long command sequence.
