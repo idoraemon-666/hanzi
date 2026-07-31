@@ -1,5 +1,11 @@
 # Server files
 
+`run_hanzi_dual_fixed_rule_loss_comparison.sh` is the isolated formal launcher
+for the user-approved 15-rule Stroke RNN and 12-rule Move RNN comparison. It
+starts the baseline, full-trial, and onset-window arms together as six
+one-thread CPU workers. The exact scientific contract is recorded in
+`DUAL_FIXED_RULE_RNN_PROTOCOL.md`.
+
 The active branch is `hanzi_stroke_temporal_composition`. Its server files are:
 
 - `create_hanzi_cpu_environment.sh`: creates the isolated CPU environment using

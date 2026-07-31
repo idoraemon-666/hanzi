@@ -1,0 +1,93 @@
+{
+  "project": "hanzi_stroke_temporal_composition",
+  "run_kind": "dual_fixed_rule_multitask_loss_comparison",
+  "variant": "dual_fixed_rule_loss_comparison_v1",
+  "enabled": true,
+  "seed": 42,
+  "validation_seed": 1042,
+  "device": "cpu",
+  "geometry_config": "configurations/hanzi_stroke_temporal_composition_canonical_geometry.json",
+  "timing": {
+    "stable_steps": 25,
+    "delay_steps": 50,
+    "hold_steps": 25,
+    "speed_name": "slow",
+    "speed_scalar": 0.0,
+    "direction_augmentation": false
+  },
+  "model_common": {
+    "network": "rnn",
+    "hidden_size": 256,
+    "output_size": 6,
+    "activation": "softplus",
+    "recurrent_noise_std": 0.1,
+    "input_noise_std": 0.01,
+    "constrained": false,
+    "rnn_dt_ms": 10,
+    "rnn_tau_ms": 20,
+    "batch_first": true
+  },
+  "models": {
+    "stroke": {
+      "rule_dim": 15,
+      "input_size": 33,
+      "max_updates": 120000,
+      "phase1_updates": 90000,
+      "phase2_updates": 30000,
+      "log_interval": 150
+    },
+    "move": {
+      "rule_dim": 12,
+      "input_size": 30,
+      "max_updates": 96000,
+      "phase1_updates": 72000,
+      "phase2_updates": 24000,
+      "log_interval": 120
+    }
+  },
+  "optimizer": {
+    "name": "Adam",
+    "phase1_learning_rate": 0.001,
+    "phase2_learning_rate": 0.0001,
+    "grad_clip_norm": 1.0
+  },
+  "training": {
+    "batch_size": 1,
+    "scheduler": "fixed_round_robin",
+    "updates_per_rule": 8000,
+    "validation_interval": 600,
+    "network_noise": false,
+    "deterministic_observation": true,
+    "parallel_processes": 6
+  },
+  "loss_arms": {
+    "baseline": "phase_normalized_l1",
+    "full_trial": "full_trial_l1",
+    "onset_window": "onset_window_phase_normalized_l1"
+  },
+  "checkpoint_selection": {
+    "common_validation_objective": "macro_mean_phase_normalized_position_l1",
+    "profiles": [
+      "best_macro_then_worst",
+      "best_worst_then_macro"
+    ],
+    "behavioral_pass_fail_threshold": null
+  },
+  "position_loss": {
+    "stable_weight": 0.1,
+    "delay_weight": 0.1,
+    "movement_weight": 0.6,
+    "hold_weight": 0.2,
+    "onset_delay_last_steps": 10,
+    "onset_movement_first_steps": 5
+  },
+  "regularization": {
+    "l1_rate": 0.001,
+    "l1_weight": 0.001,
+    "l1_muscle_act": 0.01,
+    "simple_dynamics_weight": 0.001
+  },
+  "output": {
+    "directory": "runs/hanzi_stroke_temporal_composition/dual_fixed_rule_loss_comparison/dev42"
+  }
+}
