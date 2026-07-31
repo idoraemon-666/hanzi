@@ -57,6 +57,7 @@ from losses import (
     l1_muscle_act,
     l1_rate,
     l1_weight,
+    onset_window_position_l1,
     position_l1_metrics,
     simple_dynamics,
 )
@@ -755,6 +756,14 @@ def _train_task(
         )
         if training_position_objective in (None, "phase_normalized_l1"):
             position_objective = position["phase_normalized_position_l1"]
+        elif training_position_objective == "full_trial_l1":
+            position_objective = position["full_trial_position_l1"]
+        elif training_position_objective == "onset_window_phase_normalized_l1":
+            onset_position = onset_window_position_l1(
+                result["xy"], result["target"], result["epoch_bounds"]
+            )
+            position_objective = onset_position.pop("objective")
+            position.update(onset_position)
         elif training_position_objective == "compound_subphase_equal_l1":
             subphase_position = compound_subphase_equal_position_l1(
                 result["xy"],

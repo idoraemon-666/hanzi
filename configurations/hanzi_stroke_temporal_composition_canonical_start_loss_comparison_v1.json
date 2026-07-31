@@ -1,0 +1,122 @@
+{
+  "project": "hanzi_stroke_temporal_composition",
+  "run_kind": "canonical_start_loss_comparison",
+  "variant": "canonical_start_loss_comparison_v1",
+  "enabled": true,
+  "seed": 42,
+  "validation_seed": 1042,
+  "base_config": "configurations/hanzi_stroke_temporal_composition_canonical_single_task_overfit_v1.json",
+  "checkpoint_review_config": "configurations/hanzi_stroke_temporal_composition_canonical_checkpoint_metric_review_v1.json",
+  "tasks": ["heng", "shu", "pie", "na", "dian", "ti", "hengzhe", "shugou"],
+  "baseline": {
+    "training_position_objective": "phase_normalized_l1",
+    "reuse_existing_checkpoints": true,
+    "rerun": false,
+    "shugou_control_extension": {
+      "directory": "runs/hanzi_stroke_temporal_composition/canonical_shugou_checkpoint_experiment/dev42",
+      "metrics_file": "shugou_candidate_metrics.csv",
+      "variant": "canonical_shugou_checkpoint_experiment_v1",
+      "git_head": "de9f4b070396c4e8c80be00089dee40a458c1a78",
+      "provenance_sha256": "0a85cd592163dfb9108b6f90b00feb6c7924b468f98ac9f47931ded5d36cf492",
+      "included_arm": "control",
+      "checkpoint_variant": "canonical_shugou_checkpoint_control_v1",
+      "checkpoint_prefix": "canonical_shugou_checkpoint_control",
+      "expected_control_rows": 21
+    }
+  },
+  "arms": {
+    "full_trial": {
+      "training_position_objective": "full_trial_l1",
+      "phase1_variant": "canonical_full_trial_loss_phase1_v1",
+      "phase1_checkpoint_prefix": "canonical_full_trial_loss_phase1",
+      "phase2_variant": "canonical_full_trial_loss_phase2_v1",
+      "phase2_checkpoint_prefix": "canonical_full_trial_loss_phase2"
+    },
+    "onset_window": {
+      "training_position_objective": "onset_window_phase_normalized_l1",
+      "phase1_variant": "canonical_onset_window_loss_phase1_v1",
+      "phase1_checkpoint_prefix": "canonical_onset_window_loss_phase1",
+      "phase2_variant": "canonical_onset_window_loss_phase2_v1",
+      "phase2_checkpoint_prefix": "canonical_onset_window_loss_phase2"
+    }
+  },
+  "optimizer": {
+    "phase1_learning_rate": 0.001,
+    "phase2_learning_rate": 0.0001,
+    "phase2_state": "preserve_phase1_policy_adam_and_rng_then_override_learning_rate"
+  },
+  "training": {
+    "batch_size": 1,
+    "phase1_updates": 6000,
+    "phase2_updates": 2000,
+    "total_updates_per_worker": 8000,
+    "phase1_validation_interval": 250,
+    "phase2_validation_interval": 100,
+    "log_interval": 100,
+    "parallel_processes": 16,
+    "initialization": "fresh_seed_42_matched_between_arms",
+    "delay_schedule": "matched_seeded_random_choice_25_50_75"
+  },
+  "onset_window": {
+    "outer_phase_weights": {
+      "stable": 0.1,
+      "delay": 0.1,
+      "movement": 0.6,
+      "hold": 0.2
+    },
+    "delay_internal_weights": {
+      "whole_delay": 0.5,
+      "last_10_steps": 0.5
+    },
+    "movement_internal_weights": {
+      "whole_movement": 0.9,
+      "first_5_steps": 0.1
+    },
+    "changed_factor": "delay_and_movement_internal_aggregation_only"
+  },
+  "selection": {
+    "all_task_metrics": [
+      "checkpoint_validation_loss",
+      "start_error_euclidean_m",
+      "movement_mean_euclidean_m",
+      "endpoint_euclidean_m",
+      "path_length_ratio_abs_error",
+      "max_euclidean_m"
+    ],
+    "compound_only_metrics": [
+      "pre_straight_mean_euclidean_m",
+      "transition_mean_euclidean_m",
+      "post_straight_mean_euclidean_m",
+      "transition_max_euclidean_m",
+      "exit_direction_error_deg"
+    ],
+    "metric_objective": "minimum",
+    "scale_normalization": "competition_rank_fraction",
+    "pareto_frontier_required": true,
+    "aggregate_rule": "minimize_worst_rank_then_mean_rank_then_validation_loss_then_candidate_id",
+    "behavioral_pass_fail": "not_defined"
+  },
+  "integrity_contract": {
+    "baseline_candidate_rows": 56,
+    "baseline_selected_tasks": 8,
+    "shugou_control_candidate_rows": 21,
+    "shugou_baseline_extension_rows": 22,
+    "parallel_workers": 16,
+    "phase1_scheduled_checkpoints_per_worker": 24,
+    "phase2_scheduled_checkpoints_per_worker": 20,
+    "candidate_checkpoints_per_worker": 46,
+    "new_candidate_rows": 736,
+    "champion_rows": 24,
+    "plots": 8
+  },
+  "exclusions": {
+    "move": true,
+    "shared_8task": true,
+    "shared_9task": true,
+    "formal_75k": true,
+    "complete_character_rollout": true
+  },
+  "output": {
+    "directory": "runs/hanzi_stroke_temporal_composition/canonical_start_loss_comparison/dev42"
+  }
+}

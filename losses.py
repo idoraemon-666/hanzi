@@ -9,6 +9,10 @@ from digit_writing.phase_normalized_loss import (
 
 
 COMPOUND_MOVEMENT_SUBPHASES = ("pre_straight", "transition", "post_straight")
+ONSET_DELAY_LAST_STEPS = 10
+ONSET_MOVEMENT_FIRST_STEPS = 5
+ONSET_DELAY_WEIGHTS = (0.5, 0.5)
+ONSET_MOVEMENT_WEIGHTS = (0.9, 0.1)
 
 
 def compound_subphase_equal_position_l1(
@@ -60,6 +64,46 @@ def compound_subphase_equal_position_l1(
             f"{subphase}_mean_l1": value
             for subphase, value in subphase_means.items()
         },
+    }
+
+
+def onset_window_position_l1(prediction, target, epoch_bounds):
+    """Keep phase weights while emphasizing the last delay and first movement steps."""
+
+    metrics = position_l1_metrics(prediction, target, epoch_bounds)
+    delay_start, delay_end = epoch_bounds["delay"]
+    movement_start, movement_end = epoch_bounds["movement"]
+    if delay_end - delay_start < ONSET_DELAY_LAST_STEPS:
+        raise ValueError("delay phase is shorter than the canonical onset window")
+    if movement_end - movement_start < ONSET_MOVEMENT_FIRST_STEPS:
+        raise ValueError("movement phase is shorter than the canonical onset window")
+    error = torch.sum(torch.abs(prediction - target), dim=-1)
+    delay_last_mean = torch.mean(
+        error[:, delay_end - ONSET_DELAY_LAST_STEPS : delay_end]
+    )
+    movement_first_mean = torch.mean(
+        error[:, movement_start : movement_start + ONSET_MOVEMENT_FIRST_STEPS]
+    )
+    onset_delay_mean = (
+        ONSET_DELAY_WEIGHTS[0] * metrics["delay_mean_l1"]
+        + ONSET_DELAY_WEIGHTS[1] * delay_last_mean
+    )
+    onset_movement_mean = (
+        ONSET_MOVEMENT_WEIGHTS[0] * metrics["movement_mean_l1"]
+        + ONSET_MOVEMENT_WEIGHTS[1] * movement_first_mean
+    )
+    objective = (
+        PHASE_WEIGHTS["stable"] * metrics["stable_mean_l1"]
+        + PHASE_WEIGHTS["delay"] * onset_delay_mean
+        + PHASE_WEIGHTS["movement"] * onset_movement_mean
+        + PHASE_WEIGHTS["hold"] * metrics["hold_mean_l1"]
+    )
+    return {
+        "objective": objective,
+        "onset_delay_mean_l1": onset_delay_mean,
+        "delay_last_10_mean_l1": delay_last_mean,
+        "onset_movement_mean_l1": onset_movement_mean,
+        "movement_first_5_mean_l1": movement_first_mean,
     }
 
 
