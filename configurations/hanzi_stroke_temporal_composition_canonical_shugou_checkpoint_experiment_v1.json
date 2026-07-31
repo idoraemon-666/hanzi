@@ -1,0 +1,91 @@
+{
+  "project": "hanzi_stroke_temporal_composition",
+  "run_kind": "canonical_shugou_checkpoint_experiment",
+  "variant": "canonical_shugou_checkpoint_experiment_v1",
+  "enabled": true,
+  "seed": 42,
+  "validation_seed": 1042,
+  "task": "shugou",
+  "base_config": "configurations/hanzi_stroke_temporal_composition_canonical_single_task_overfit_v1.json",
+  "checkpoint_review_config": "configurations/hanzi_stroke_temporal_composition_canonical_checkpoint_metric_review_v1.json",
+  "selection": {
+    "all_task_metrics": [
+      "checkpoint_validation_loss",
+      "start_error_euclidean_m",
+      "movement_mean_euclidean_m",
+      "endpoint_euclidean_m",
+      "path_length_ratio_abs_error",
+      "max_euclidean_m"
+    ],
+    "compound_only_metrics": [
+      "pre_straight_mean_euclidean_m",
+      "transition_mean_euclidean_m",
+      "post_straight_mean_euclidean_m",
+      "transition_max_euclidean_m",
+      "exit_direction_error_deg"
+    ],
+    "metric_objective": "minimum",
+    "scale_normalization": "competition_rank_fraction",
+    "pareto_frontier_required": true,
+    "aggregate_rule": "minimize_worst_rank_then_mean_rank_then_validation_loss_then_candidate_id",
+    "behavioral_pass_fail": "not_defined"
+  },
+  "optimizer": {
+    "learning_rate": 0.0001,
+    "source_optimizer_state": "preserve_then_set_learning_rate"
+  },
+  "training": {
+    "additional_updates_per_arm": 2000,
+    "batch_size": 1,
+    "validation_interval": 100,
+    "log_interval": 100,
+    "parallel_processes": 2,
+    "candidate_checkpoint_interval": 100
+  },
+  "arms": {
+    "control": {
+      "variant": "canonical_shugou_checkpoint_control_v1",
+      "checkpoint_prefix": "canonical_shugou_checkpoint_control",
+      "training_position_objective": "phase_normalized_l1"
+    },
+    "subphase_equal": {
+      "variant": "canonical_shugou_subphase_equal_v1",
+      "checkpoint_prefix": "canonical_shugou_subphase_equal",
+      "training_position_objective": "compound_subphase_equal_l1"
+    }
+  },
+  "intervention": {
+    "outer_phase_weights": {
+      "stable": 0.1,
+      "delay": 0.1,
+      "movement": 0.6,
+      "hold": 0.2
+    },
+    "movement_subphases": [
+      "pre_straight",
+      "transition",
+      "post_straight"
+    ],
+    "movement_subphase_weights": [
+      0.3333333333333333,
+      0.3333333333333333,
+      0.3333333333333333
+    ],
+    "changed_factor": "movement_internal_aggregation_only"
+  },
+  "integrity_contract": {
+    "initial_candidate_rows": 56,
+    "initial_selected_tasks": 8,
+    "scheduled_checkpoints_per_arm": 20,
+    "final_shugou_candidate_rows": 43
+  },
+  "exclusions": {
+    "move": true,
+    "shared_9task": true,
+    "formal_75k": true,
+    "complete_character_rollout": true
+  },
+  "output": {
+    "directory": "runs/hanzi_stroke_temporal_composition/canonical_shugou_checkpoint_experiment/dev42"
+  }
+}

@@ -52,6 +52,7 @@ from hanzi_writing.training import (
     _state_clone,
 )
 from losses import (
+    compound_subphase_equal_position_l1,
     detached_position_metrics,
     l1_muscle_act,
     l1_rate,
@@ -590,6 +591,10 @@ def _train_task(
     initial_checkpoint_path: Path | None = None,
     checkpoint_variant: str = CANONICAL_VARIANT,
     checkpoint_prefix: str = "canonical_single_task",
+    initial_checkpoint_variant: str = CANONICAL_VARIANT,
+    initial_checkpoint_prefix: str = "canonical_single_task",
+    training_position_objective: str | None = None,
+    save_scheduled_checkpoints: bool = False,
 ) -> dict[str, Any]:
     training = config["training"]
     if target_updates is None:
@@ -612,6 +617,7 @@ def _train_task(
     best_path = output / "best_checkpoint.pt"
     continuation_path = output / "continuation_checkpoint.pt"
     review_path = output / "review_checkpoint.pt"
+    candidate_directory = output / "scheduled_checkpoints"
     if output.exists():
         if not continuation_path.is_file():
             raise FileExistsError(
@@ -631,6 +637,12 @@ def _train_task(
             map_location=torch.device("cpu"),
             weights_only=False,
         )
+        if (
+            training_position_objective is not None
+            and continuation_checkpoint.get("training_position_objective")
+            != training_position_objective
+        ):
+            raise ValueError("canonical continuation position objective differs")
         start_update, losses = _restore_continuation_state(
             continuation_checkpoint,
             policy,
@@ -652,6 +664,11 @@ def _train_task(
             or best_checkpoint.get("checkpoint_kind")
             != f"{checkpoint_prefix}_best"
             or best_checkpoint.get("task") != task
+            or (
+                training_position_objective is not None
+                and best_checkpoint.get("training_position_objective")
+                != training_position_objective
+            )
         ):
             raise ValueError("canonical best checkpoint identity differs")
         best_validation = float(best_checkpoint["validation_loss"])
@@ -666,11 +683,11 @@ def _train_task(
             )
             if (
                 initial_checkpoint.get("project") != PROJECT
-                or initial_checkpoint.get("variant") != CANONICAL_VARIANT
+                or initial_checkpoint.get("variant") != initial_checkpoint_variant
                 or initial_checkpoint.get("checkpoint_kind")
                 not in {
-                    "canonical_single_task_best",
-                    "canonical_single_task_review",
+                    f"{initial_checkpoint_prefix}_best",
+                    f"{initial_checkpoint_prefix}_review",
                 }
                 or initial_checkpoint.get("task") != task
             ):
@@ -689,6 +706,8 @@ def _train_task(
             random.setstate(rng_state["python"])
             np.random.set_state(rng_state["numpy"])
             torch.set_rng_state(rng_state["torch"])
+        if save_scheduled_checkpoints:
+            candidate_directory.mkdir()
         losses = []
         best_validation = np.inf
         best_update = None
@@ -734,7 +753,20 @@ def _train_task(
         position = position_l1_metrics(
             result["xy"], result["target"], result["epoch_bounds"]
         )
-        loss = position["phase_normalized_position_l1"]
+        if training_position_objective in (None, "phase_normalized_l1"):
+            position_objective = position["phase_normalized_position_l1"]
+        elif training_position_objective == "compound_subphase_equal_l1":
+            subphase_position = compound_subphase_equal_position_l1(
+                result["xy"],
+                result["target"],
+                result["epoch_bounds"],
+                env.component_trajectories[0].movement_subphase,
+            )
+            position_objective = subphase_position.pop("objective")
+            position.update(subphase_position)
+        else:
+            raise ValueError("canonical training position objective differs")
+        loss = position_objective
         loss = loss + l1_rate(result["hidden"], hp["l1_rate"])
         loss = loss + l1_weight(policy, hp["l1_weight"])
         loss = loss + l1_muscle_act(result["muscle"], hp["l1_muscle_act"])
@@ -785,7 +817,27 @@ def _train_task(
                         "task": task,
                     }
                 )
+                if training_position_objective is not None:
+                    payload["training_position_objective"] = (
+                        training_position_objective
+                    )
                 _atomic_torch_save(payload, best_path)
+            if save_scheduled_checkpoints:
+                candidate_payload = _checkpoint_payload(
+                    policy, optimizer, hp, update, value
+                )
+                candidate_payload.update(
+                    {
+                        "project": PROJECT,
+                        "checkpoint_kind": f"{checkpoint_prefix}_candidate",
+                        "task": task,
+                        "training_position_objective": training_position_objective,
+                    }
+                )
+                _atomic_torch_save(
+                    candidate_payload,
+                    candidate_directory / f"update_{update:06d}.pt",
+                )
             continuation_payload = _continuation_payload(
                 policy,
                 optimizer,
@@ -798,6 +850,10 @@ def _train_task(
                 losses,
                 training["log_interval"],
             )
+            if training_position_objective is not None:
+                continuation_payload["training_position_objective"] = (
+                    training_position_objective
+                )
             _atomic_torch_save(continuation_payload, continuation_path)
     review_readonly = canonical_readonly_validation(
         policy,
@@ -831,6 +887,10 @@ def _train_task(
         losses,
         training["log_interval"],
     )
+    if training_position_objective is not None:
+        continuation_payload["training_position_objective"] = (
+            training_position_objective
+        )
     _atomic_torch_save(continuation_payload, continuation_path)
     review_payload = _continuation_payload(
         policy,
@@ -844,6 +904,8 @@ def _train_task(
         losses,
         training["log_interval"],
     )
+    if training_position_objective is not None:
+        review_payload["training_position_objective"] = training_position_objective
     _atomic_torch_save(review_payload, review_path)
     return {
         "task": task,

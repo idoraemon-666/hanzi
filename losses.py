@@ -1,10 +1,67 @@
 import torch
 
 from digit_writing.phase_normalized_loss import (
+    PHASE_WEIGHTS,
     detached_position_metrics,
     phase_normalized_l1,
     position_l1_metrics,
 )
+
+
+COMPOUND_MOVEMENT_SUBPHASES = ("pre_straight", "transition", "post_straight")
+
+
+def compound_subphase_equal_position_l1(
+    prediction,
+    target,
+    epoch_bounds,
+    movement_subphase,
+):
+    """Keep canonical phase weights but average compound movement subphases equally."""
+
+    metrics = position_l1_metrics(prediction, target, epoch_bounds)
+    movement_start, movement_end = epoch_bounds["movement"]
+    labels = tuple(movement_subphase)
+    if len(labels) != movement_end - movement_start:
+        raise ValueError("compound movement subphase length differs from movement bounds")
+    if set(labels) != set(COMPOUND_MOVEMENT_SUBPHASES):
+        raise ValueError("compound movement subphases differ")
+    movement_error = torch.sum(
+        torch.abs(
+            prediction[:, movement_start:movement_end]
+            - target[:, movement_start:movement_end]
+        ),
+        dim=-1,
+    )
+    subphase_means = {
+        subphase: torch.mean(
+            movement_error[
+                :,
+                torch.tensor(
+                    [label == subphase for label in labels],
+                    dtype=torch.bool,
+                    device=movement_error.device,
+                ),
+            ]
+        )
+        for subphase in COMPOUND_MOVEMENT_SUBPHASES
+    }
+    equal_movement_mean = torch.stack(tuple(subphase_means.values())).mean()
+    objective = (
+        PHASE_WEIGHTS["stable"] * metrics["stable_mean_l1"]
+        + PHASE_WEIGHTS["delay"] * metrics["delay_mean_l1"]
+        + PHASE_WEIGHTS["movement"] * equal_movement_mean
+        + PHASE_WEIGHTS["hold"] * metrics["hold_mean_l1"]
+    )
+    return {
+        "objective": objective,
+        "movement_subphase_equal_mean_l1": equal_movement_mean,
+        **{
+            f"{subphase}_mean_l1": value
+            for subphase, value in subphase_means.items()
+        },
+    }
+
 
 def l1_dist(x, y):
     """L1 loss"""
