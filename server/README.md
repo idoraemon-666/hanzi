@@ -6,6 +6,12 @@ starts the baseline, full-trial, and onset-window arms together as six
 one-thread CPU workers. The exact scientific contract is recorded in
 `DUAL_FIXED_RULE_RNN_PROTOCOL.md`.
 
+`run_hanzi_dual_fixed_rule_joint_gradient.sh` is the separately authorized
+six-worker companion. Each optimizer step averages one gradient from every
+Stroke or Move rule while preserving 8000 exposures per rule. It must run from
+an independent repository while the round-robin experiment is active. The
+exact contract is recorded in `DUAL_FIXED_RULE_JOINT_GRADIENT_PROTOCOL.md`.
+
 The active branch is `hanzi_stroke_temporal_composition`. Its server files are:
 
 - `create_hanzi_cpu_environment.sh`: creates the isolated CPU environment using

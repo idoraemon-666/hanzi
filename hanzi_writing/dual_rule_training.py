@@ -70,6 +70,12 @@ CONFIG_PATH = (
     / "configurations"
     / "hanzi_stroke_temporal_composition_dual_fixed_rule_rnn_v1.json"
 )
+JOINT_GRADIENT_CONFIG_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "configurations"
+    / "hanzi_stroke_temporal_composition_dual_fixed_rule_joint_gradient_v1.json"
+)
+JOINT_GRADIENT_VARIANT = "dual_fixed_rule_joint_gradient_loss_comparison_v1"
 CHECKPOINT_PROFILES = (
     "best_macro_then_worst",
     "best_worst_then_macro",
@@ -156,10 +162,83 @@ def load_config(path: str | Path = CONFIG_PATH) -> tuple[dict[str, Any], Geometr
         },
         "dual-RNN configuration",
     )
+    variant = config["variant"]
+    if variant == VARIANT:
+        expected_run_kind = "dual_fixed_rule_multitask_loss_comparison"
+        expected_models = {
+            "stroke": {
+                "rule_dim": 15,
+                "input_size": 33,
+                "max_updates": 120000,
+                "phase1_updates": 90000,
+                "phase2_updates": 30000,
+                "log_interval": 150,
+            },
+            "move": {
+                "rule_dim": 12,
+                "input_size": 30,
+                "max_updates": 96000,
+                "phase1_updates": 72000,
+                "phase2_updates": 24000,
+                "log_interval": 120,
+            },
+        }
+        expected_training = {
+            "batch_size": 1,
+            "scheduler": "fixed_round_robin",
+            "updates_per_rule": 8000,
+            "validation_interval": 600,
+            "network_noise": False,
+            "deterministic_observation": True,
+            "parallel_processes": 6,
+        }
+        expected_output = (
+            "runs/hanzi_stroke_temporal_composition/"
+            "dual_fixed_rule_loss_comparison/dev42"
+        )
+    elif variant == JOINT_GRADIENT_VARIANT:
+        expected_run_kind = (
+            "dual_fixed_rule_multitask_joint_gradient_loss_comparison"
+        )
+        expected_models = {
+            "stroke": {
+                "rule_dim": 15,
+                "input_size": 33,
+                "max_updates": 8000,
+                "phase1_updates": 6000,
+                "phase2_updates": 2000,
+                "log_interval": 10,
+                "validation_interval": 40,
+            },
+            "move": {
+                "rule_dim": 12,
+                "input_size": 30,
+                "max_updates": 8000,
+                "phase1_updates": 6000,
+                "phase2_updates": 2000,
+                "log_interval": 10,
+                "validation_interval": 50,
+            },
+        }
+        expected_training = {
+            "microbatch_size_per_rule": 1,
+            "optimizer_step_mode": "all_rules_mean_gradient",
+            "scheduler": "all_rules_every_optimizer_step",
+            "updates_per_rule": 8000,
+            "effective_rules_per_optimizer_step": {"stroke": 15, "move": 12},
+            "network_noise": False,
+            "deterministic_observation": True,
+            "parallel_processes": 6,
+        }
+        expected_output = (
+            "runs/hanzi_stroke_temporal_composition/"
+            "dual_fixed_rule_joint_gradient_loss_comparison/dev42"
+        )
+    else:
+        raise ValueError("dual-RNN experiment variant differs")
     identity = (
         config["project"],
         config["run_kind"],
-        config["variant"],
         config["enabled"],
         config["seed"],
         config["validation_seed"],
@@ -167,8 +246,7 @@ def load_config(path: str | Path = CONFIG_PATH) -> tuple[dict[str, Any], Geometr
     )
     if identity != (
         PROJECT,
-        "dual_fixed_rule_multitask_loss_comparison",
-        VARIANT,
+        expected_run_kind,
         True,
         42,
         1042,
@@ -201,24 +279,6 @@ def load_config(path: str | Path = CONFIG_PATH) -> tuple[dict[str, Any], Geometr
         "batch_first": True,
     }:
         raise ValueError("dual-RNN model core differs")
-    expected_models = {
-        "stroke": {
-            "rule_dim": 15,
-            "input_size": 33,
-            "max_updates": 120000,
-            "phase1_updates": 90000,
-            "phase2_updates": 30000,
-            "log_interval": 150,
-        },
-        "move": {
-            "rule_dim": 12,
-            "input_size": 30,
-            "max_updates": 96000,
-            "phase1_updates": 72000,
-            "phase2_updates": 24000,
-            "log_interval": 120,
-        },
-    }
     if config["models"] != expected_models:
         raise ValueError("dual-RNN model schedules differ")
     if config["optimizer"] != {
@@ -228,15 +288,7 @@ def load_config(path: str | Path = CONFIG_PATH) -> tuple[dict[str, Any], Geometr
         "grad_clip_norm": 1.0,
     }:
         raise ValueError("dual-RNN optimizer differs")
-    if config["training"] != {
-        "batch_size": 1,
-        "scheduler": "fixed_round_robin",
-        "updates_per_rule": 8000,
-        "validation_interval": 600,
-        "network_noise": False,
-        "deterministic_observation": True,
-        "parallel_processes": 6,
-    }:
+    if config["training"] != expected_training:
         raise ValueError("dual-RNN training contract differs")
     if config["loss_arms"] != {
         "baseline": "phase_normalized_l1",
@@ -266,12 +318,7 @@ def load_config(path: str | Path = CONFIG_PATH) -> tuple[dict[str, Any], Geometr
         "simple_dynamics_weight": 0.001,
     }:
         raise ValueError("dual-RNN regularization differs")
-    if config["output"] != {
-        "directory": (
-            "runs/hanzi_stroke_temporal_composition/"
-            "dual_fixed_rule_loss_comparison/dev42"
-        )
-    }:
+    if config["output"] != {"directory": expected_output}:
         raise ValueError("dual-RNN output contract differs")
     geometry = load_geometry_config(config["geometry_config"])
     if (
@@ -283,17 +330,32 @@ def load_config(path: str | Path = CONFIG_PATH) -> tuple[dict[str, Any], Geometr
     for model_kind in MODEL_KINDS:
         model = config["models"][model_kind]
         count = len(rule_names(model_kind))
-        if (
+        common_invalid = (
             model["rule_dim"] != count
             or model["input_size"] != input_size(model_kind)
-            or model["max_updates"] != count * config["training"]["updates_per_rule"]
             or model["phase1_updates"] + model["phase2_updates"]
             != model["max_updates"]
-            or model["phase1_updates"] % count
-            or model["phase2_updates"] % count
-            or config["training"]["validation_interval"] % count
-            or model["log_interval"] % count
-        ):
+        )
+        if variant == VARIANT:
+            schedule_invalid = (
+                model["max_updates"]
+                != count * config["training"]["updates_per_rule"]
+                or model["phase1_updates"] % count
+                or model["phase2_updates"] % count
+                or config["training"]["validation_interval"] % count
+                or model["log_interval"] % count
+            )
+        else:
+            schedule_invalid = (
+                model["max_updates"] != config["training"]["updates_per_rule"]
+                or config["training"]["effective_rules_per_optimizer_step"][
+                    model_kind
+                ]
+                != count
+                or model["max_updates"] % model["validation_interval"]
+                or model["max_updates"] % model["log_interval"]
+            )
+        if common_invalid or schedule_invalid:
             raise ValueError(f"dual-RNN cycle arithmetic differs for {model_kind}")
     return config, geometry
 
@@ -316,14 +378,34 @@ def _runtime_hp(config: dict[str, Any], model_kind: str) -> dict[str, Any]:
         "grad_clip_norm": config["optimizer"]["grad_clip_norm"],
         "batch_size": 1,
         "epochs": model["max_updates"],
-        "save_iter": config["training"]["validation_interval"],
+        "save_iter": _validation_interval(config, model_kind),
         **config["regularization"],
         "seed": config["seed"],
         "validation_seed": config["validation_seed"],
-        "variant": VARIANT,
+        "variant": config["variant"],
         "project": PROJECT,
         "protocol_config": config,
     }
+
+
+def _optimizer_step_mode(config: dict[str, Any]) -> str:
+    if config["variant"] == VARIANT:
+        return "single_rule_round_robin"
+    return config["training"]["optimizer_step_mode"]
+
+
+def _validation_interval(config: dict[str, Any], model_kind: str) -> int:
+    if config["variant"] == VARIANT:
+        return int(config["training"]["validation_interval"])
+    return int(config["models"][model_kind]["validation_interval"])
+
+
+def _updates_per_rule(config: dict[str, Any], model_kind: str) -> int:
+    if config["variant"] == VARIANT:
+        return int(config["models"][model_kind]["max_updates"]) // len(
+            rule_names(model_kind)
+        )
+    return int(config["models"][model_kind]["max_updates"])
 
 
 def scheduled_rule(model_kind: str, update: int) -> str:
@@ -479,10 +561,11 @@ def _checkpoint_identity(
     model_kind: str,
     arm: str,
     manifest: dict[str, Any],
+    variant: str = VARIANT,
 ) -> dict[str, Any]:
     return {
         "project": PROJECT,
-        "variant": VARIANT,
+        "variant": variant,
         "model_kind": model_kind,
         "loss_arm": arm,
         "rule_dim": len(rule_names(model_kind)),
@@ -497,8 +580,9 @@ def validate_checkpoint_identity(
     model_kind: str,
     arm: str,
     manifest: dict[str, Any],
+    variant: str = VARIANT,
 ) -> None:
-    expected = _checkpoint_identity(model_kind, arm, manifest)
+    expected = _checkpoint_identity(model_kind, arm, manifest, variant)
     actual = {name: checkpoint.get(name) for name in expected}
     if actual != expected:
         raise ValueError("dual-RNN checkpoint identity differs")
@@ -522,7 +606,7 @@ def _base_checkpoint(
     payload = _checkpoint_payload(policy, optimizer, hp, update, macro)
     payload.update(
         {
-            **_checkpoint_identity(model_kind, arm, manifest),
+            **_checkpoint_identity(model_kind, arm, manifest, hp["variant"]),
             "checkpoint_kind": checkpoint_kind,
             "common_validation": validation,
         }
@@ -576,8 +660,9 @@ def _restore_continuation(
     model_kind: str,
     arm: str,
     manifest: dict[str, Any],
+    variant: str,
 ) -> tuple[int, list[float], dict[str, Any]]:
-    validate_checkpoint_identity(checkpoint, model_kind, arm, manifest)
+    validate_checkpoint_identity(checkpoint, model_kind, arm, manifest, variant)
     if checkpoint.get("checkpoint_kind") != "dual_fixed_rule_continuation":
         raise ValueError("dual-RNN continuation checkpoint kind differs")
     policy.load_state_dict(checkpoint["agent_state_dict"])
@@ -676,6 +761,74 @@ def _initial_selection_state() -> dict[str, Any]:
     }
 
 
+def _training_conditions(
+    config: dict[str, Any],
+    model_kind: str,
+    update: int,
+    library: tuple[FixedRuleCondition, ...],
+    by_rule: dict[str, FixedRuleCondition],
+) -> tuple[FixedRuleCondition, ...]:
+    mode = _optimizer_step_mode(config)
+    if mode == "single_rule_round_robin":
+        return (by_rule[scheduled_rule(model_kind, update)],)
+    if mode == "all_rules_mean_gradient":
+        return library
+    raise ValueError("dual-RNN optimizer step mode differs")
+
+
+def _training_step(
+    policy,
+    optimizer,
+    env: DualFixedRuleEnv,
+    hp: dict[str, Any],
+    arm: str,
+    step_conditions: tuple[FixedRuleCondition, ...],
+) -> dict[str, Any]:
+    if not step_conditions:
+        raise ValueError("dual-RNN optimizer step has no rules")
+    optimizer.zero_grad()
+    task_losses = []
+    position_rows = []
+    scale = 1.0 / len(step_conditions)
+    for condition in step_conditions:
+        result = _rollout(
+            policy,
+            env,
+            hp,
+            (condition,),
+            FIXED_SPEED_NAME,
+            FIXED_DELAY_STEPS,
+            network_noise=False,
+            deterministic_observation=True,
+            track_gradients=True,
+        )
+        position_objective, position = _position_objective(arm, result)
+        task_loss = position_objective
+        task_loss = task_loss + l1_rate(result["hidden"], hp["l1_rate"])
+        task_loss = task_loss + l1_weight(policy, hp["l1_weight"])
+        task_loss = task_loss + l1_muscle_act(
+            result["muscle"], hp["l1_muscle_act"]
+        )
+        task_loss = task_loss + simple_dynamics(
+            result["hidden"], policy.mrnn, weight=hp["simple_dynamics_weight"]
+        )
+        (task_loss * scale).backward()
+        task_losses.append(float(task_loss.detach().cpu()))
+        position_rows.append(detached_position_metrics(position))
+    torch.nn.utils.clip_grad_norm_(policy.parameters(), hp["grad_clip_norm"])
+    optimizer.step()
+    metric_names = set(position_rows[0])
+    if any(set(row) != metric_names for row in position_rows[1:]):
+        raise RuntimeError("dual-RNN per-rule training metrics differ")
+    return {
+        "mean_total_loss": float(np.mean(task_losses)),
+        "mean_position_metrics": {
+            name: float(np.mean([row[name] for row in position_rows]))
+            for name in sorted(metric_names)
+        },
+    }
+
+
 def train_worker(
     config_path: str | Path,
     model_kind: str,
@@ -736,6 +889,7 @@ def train_worker(
             model_kind,
             arm,
             manifest,
+            config["variant"],
         )
     else:
         output.mkdir(parents=False, exist_ok=False)
@@ -801,7 +955,7 @@ def train_worker(
     max_updates = schedule["max_updates"]
     phase1_updates = schedule["phase1_updates"]
     log_interval = schedule["log_interval"]
-    validation_interval = config["training"]["validation_interval"]
+    validation_interval = _validation_interval(config, model_kind)
     if start_update > max_updates:
         raise ValueError("dual-RNN continuation exceeds the configured updates")
     for update in range(start_update, max_updates):
@@ -812,45 +966,35 @@ def train_worker(
         )
         for parameter_group in optimizer.param_groups:
             parameter_group["lr"] = learning_rate
-        rule = scheduled_rule(model_kind, update)
-        condition = by_rule[rule]
-        result = _rollout(
+        step_conditions = _training_conditions(
+            config, model_kind, update, library, by_rule
+        )
+        step_result = _training_step(
             policy,
+            optimizer,
             env,
             hp,
-            (condition,),
-            FIXED_SPEED_NAME,
-            FIXED_DELAY_STEPS,
-            network_noise=False,
-            deterministic_observation=True,
-            track_gradients=True,
+            arm,
+            step_conditions,
         )
-        position_objective, position = _position_objective(arm, result)
-        loss = position_objective
-        loss = loss + l1_rate(result["hidden"], hp["l1_rate"])
-        loss = loss + l1_weight(policy, hp["l1_weight"])
-        loss = loss + l1_muscle_act(result["muscle"], hp["l1_muscle_act"])
-        loss = loss + simple_dynamics(
-            result["hidden"], policy.mrnn, weight=hp["simple_dynamics_weight"]
-        )
-        optimizer.zero_grad()
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(policy.parameters(), hp["grad_clip_norm"])
-        optimizer.step()
-        losses.append(float(loss.detach().cpu()))
+        losses.append(step_result["mean_total_loss"])
         completed = update + 1
         if completed % log_interval == 0:
+            joint_gradient = len(step_conditions) > 1
+            condition = step_conditions[-1]
             row = {
                 "update": update,
                 "completed_updates": completed,
                 "model_kind": model_kind,
                 "loss_arm": arm,
-                "rule": rule,
-                "condition_id": condition.condition_id,
+                "optimizer_step_mode": _optimizer_step_mode(config),
+                "rules_per_optimizer_step": len(step_conditions),
+                "rule": "all_rules" if joint_gradient else condition.rule,
+                "condition_id": None if joint_gradient else condition.condition_id,
                 "delay_steps": FIXED_DELAY_STEPS,
                 "learning_rate": learning_rate,
                 "mean_total_loss": float(np.mean(losses[-log_interval:])),
-                **detached_position_metrics(position),
+                **step_result["mean_position_metrics"],
             }
             _append_jsonl(output / "training_metrics.jsonl", row)
             print(json.dumps(row, sort_keys=True), flush=True)
@@ -933,7 +1077,11 @@ def train_worker(
         "model_kind": model_kind,
         "loss_arm": arm,
         "completed_updates": max_updates,
-        "updates_per_rule": max_updates // len(library),
+        "updates_per_rule": _updates_per_rule(config, model_kind),
+        "optimizer_step_mode": _optimizer_step_mode(config),
+        "rules_per_optimizer_step": len(
+            _training_conditions(config, model_kind, 0, library, by_rule)
+        ),
         "phase1_updates": phase1_updates,
         "phase2_updates": schedule["phase2_updates"],
         "elapsed_seconds": time.monotonic() - started,
@@ -952,7 +1100,9 @@ def _load_policy(
     manifest: dict[str, Any],
 ):
     checkpoint = torch.load(path, map_location="cpu", weights_only=False)
-    validate_checkpoint_identity(checkpoint, model_kind, arm, manifest)
+    validate_checkpoint_identity(
+        checkpoint, model_kind, arm, manifest, config["variant"]
+    )
     policy = _build_policy(
         checkpoint["hp"], config["model_common"]["output_size"], torch.device("cpu")
     )
@@ -1134,15 +1284,24 @@ def prepare_experiment(config_path: str | Path) -> dict[str, Any]:
             arrays[f"{model_kind}__{condition.rule}"] = condition.points_m
     np.savez_compressed(output / "target_trajectories.npz", **arrays)
     _plot_target_audit(output / "target_audit.png", libraries)
+    joint_gradient = config["variant"] == JOINT_GRADIENT_VARIANT
     report = [
         "# Dual fixed-rule RNN preflight",
         "",
-        f"- variant: `{VARIANT}`",
+        f"- variant: `{config['variant']}`",
         "- Stroke RNN: 15 independent one-hot rules, input size 33",
         "- Move RNN: 12 independent one-hot rules, input size 30",
         "- fixed delay: 50 steps",
-        "- batch size: 1",
-        "- scheduler: deterministic fixed round-robin",
+        (
+            "- optimizer step: mean gradient over every rule"
+            if joint_gradient
+            else "- batch size: 1"
+        ),
+        (
+            "- scheduler: all rules once per optimizer step"
+            if joint_gradient
+            else "- scheduler: deterministic fixed round-robin"
+        ),
         "- loss arms: baseline, full_trial, onset_window",
         "- behavioral pass/fail threshold: none",
         "",
@@ -1240,7 +1399,7 @@ def finalize_experiment(config_path: str | Path) -> dict[str, Any]:
     )
     provenance = {
         "project": PROJECT,
-        "variant": VARIANT,
+        "variant": config["variant"],
         "completed": True,
         "git_head": _git_value("rev-parse", "HEAD"),
         "submodule_head": _git_value("-C", "mRNNTorch", "rev-parse", "HEAD"),
@@ -1248,7 +1407,6 @@ def finalize_experiment(config_path: str | Path) -> dict[str, Any]:
         "models": list(MODEL_KINDS),
         "loss_arms": list(LOSS_ARMS),
         "fixed_delay_steps": FIXED_DELAY_STEPS,
-        "batch_size": 1,
         "automatic_checkpoint_selection_performed": True,
         "checkpoint_profiles": list(CHECKPOINT_PROFILES),
         "behavioral_pass_fail_defined": False,
@@ -1261,6 +1419,24 @@ def finalize_experiment(config_path: str | Path) -> dict[str, Any]:
             "all_numeric_values_finite": True,
         },
     }
+    if config["variant"] == VARIANT:
+        provenance["batch_size"] = 1
+    else:
+        provenance.update(
+            {
+                "microbatch_size_per_rule": 1,
+                "optimizer_step_mode": _optimizer_step_mode(config),
+                "effective_rules_per_optimizer_step": {
+                    model_kind: len(rule_names(model_kind))
+                    for model_kind in MODEL_KINDS
+                },
+                "optimizer_steps_per_model": {
+                    model_kind: config["models"][model_kind]["max_updates"]
+                    for model_kind in MODEL_KINDS
+                },
+                "rule_exposures_per_rule": config["training"]["updates_per_rule"],
+            }
+        )
     _write_json(output / "provenance.json", provenance)
     return provenance
 
