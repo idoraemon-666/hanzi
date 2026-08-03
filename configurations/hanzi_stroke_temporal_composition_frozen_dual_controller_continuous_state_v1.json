@@ -1,0 +1,59 @@
+{
+  "project": "hanzi_stroke_temporal_composition",
+  "run_kind": "frozen_dual_controller_continuous_physical_state_composition",
+  "variant": "frozen_joint_gradient_onset_window_continuous_physical_state_v1",
+  "enabled": true,
+  "seed": 42,
+  "device": "cpu",
+  "joint_gradient_config": "configurations/hanzi_stroke_temporal_composition_dual_fixed_rule_joint_gradient_v1.json",
+  "source": {
+    "variant": "dual_fixed_rule_joint_gradient_loss_comparison_v1",
+    "git_head": "e41238ef8dea6bc5d3ba7781ba9beb118086be62",
+    "submodule_head": "ac0c4f589eae37bbde63968912925de99232e306",
+    "resolved_config_sha256": "b286675560f95b22d3651a5dfbeffe009149dd4e422b3c5ea7b512c8c41d9ee1",
+    "provenance_sha256": "7bc4966fbd161d2d3e9a7c8b8bfd5668490e9f80e21e5c6801a654ac8a498441",
+    "condition_manifest_sha256": {
+      "stroke": "08141351f9b1d2edc16246409ec7c060643f663abc99aae4fbce8c7462448edb",
+      "move": "1ddcb6c276c9a733baeb2069c8544d0e20ccfb1f59066f7ef5db87ece59395e5"
+    },
+    "checkpoints": {
+      "stroke": {
+        "loss_arm": "onset_window",
+        "relative_path": "stroke/onset_window/best_macro_checkpoint.pt",
+        "sha256": "f04fceeecbe0fc298064224d12eaba46160ebebde96ed8b007bed96824b4108f",
+        "update": 7999
+      },
+      "move": {
+        "loss_arm": "onset_window",
+        "relative_path": "move/onset_window/best_macro_checkpoint.pt",
+        "sha256": "a6f5219dac6d1662d00e76b6ed713a92fcb5787befb7bb0d632ad3fde71ce005",
+        "update": 7599
+      }
+    }
+  },
+  "composition": {
+    "characters": ["mu", "jiang", "ke"],
+    "controller_order": "stroke_then_alternating_move_stroke",
+    "complete_trial_per_task": true,
+    "character_initial_effector_state": "canonical_start_standard_reset",
+    "intertrial_effector_operation": "none_shared_instance",
+    "physical_state_carryover": ["joint", "cartesian", "muscle", "geometry"],
+    "physical_state_continuity_requirement": "bitwise_equal_before_next_action",
+    "fingertip_endpoint_continuity": true,
+    "recurrent_state_reset_each_trial": true,
+    "feedback_buffers": "reinitialize_from_current_continuous_sensory_state",
+    "translate_canonical_target": false,
+    "network_noise": false,
+    "deterministic_observation": true
+  },
+  "render": {
+    "trajectory": "actual_complete_trial_including_physical_start_state",
+    "stroke_linestyle": "solid",
+    "move_linestyle": "dashed",
+    "equal_aspect": true,
+    "postprocessing": false
+  },
+  "output": {
+    "directory": "runs/hanzi_stroke_temporal_composition/frozen_dual_controller_continuous_physical_state/dev42"
+  }
+}
