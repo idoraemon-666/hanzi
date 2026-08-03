@@ -5,7 +5,7 @@ if [[ $# -ne 4 ]]; then
   echo "Usage: bash server/run_hanzi_frozen_dual_controller_composition.sh REPO EXPECTED_HEAD SOURCE_RESULTS ARCHIVE_BASE" >&2
   exit 2
 fi
-if [[ "${HANZI_TEMPORAL_COMPOSITION_AUTHORIZED_RUN:-}" != "frozen-dual-controller-composition-v1" ]]; then
+if [[ "${HANZI_TEMPORAL_COMPOSITION_AUTHORIZED_RUN:-}" != "frozen-dual-controller-full-trial-composition-v2" ]]; then
   echo "STOP: explicit authorization for frozen dual-controller composition is required." >&2
   exit 2
 fi
@@ -16,8 +16,8 @@ SOURCE_RESULTS="$(realpath "$3")"
 ARCHIVE_BASE="$(realpath -m "$4")"
 PYTHON=/root/autodl-tmp/conda/envs/hanzi-stroke-temporal-composition-cpu/bin/python
 SUBMODULE_HEAD=ac0c4f589eae37bbde63968912925de99232e306
-CONFIG=configurations/hanzi_stroke_temporal_composition_frozen_dual_controller_composition_v1.json
-OUTPUT="$REPO/runs/hanzi_stroke_temporal_composition/frozen_dual_controller_character_composition/dev42"
+CONFIG=configurations/hanzi_stroke_temporal_composition_frozen_dual_controller_composition_full_trial_v2.json
+OUTPUT="$REPO/runs/hanzi_stroke_temporal_composition/frozen_dual_controller_character_composition_full_trial/dev42"
 ARCHIVE="${ARCHIVE_BASE}.tar.gz"
 ARCHIVE_SHA="${ARCHIVE}.sha256"
 LOG_TMP="${ARCHIVE_BASE}.execution.log.tmp"
@@ -83,6 +83,7 @@ PY
   echo "STROKE_TRIAL_COUNT=15"
   echo "MOVE_TRIAL_COUNT=12"
   echo "ACTUAL_ENDPOINT_AS_NEXT_START=1"
+  echo "FULL_TRIAL_RENDER=1"
   echo "TRAINING_STARTED=0"
   echo "TRAJECTORY_POSTPROCESSING_PERFORMED=0"
 ) 2>&1 | tee "$LOG_TMP"
@@ -101,6 +102,13 @@ fi
 
 test -d "$OUTPUT"
 test -z "$(git -C "$REPO" status --short)"
+for plot in \
+  mu_actual_full_trial_composition.png \
+  jiang_actual_full_trial_composition.png \
+  ke_actual_full_trial_composition.png \
+  three_characters_actual_full_trial_composition.png; do
+  test -f "$OUTPUT/plots/$plot"
+done
 cp "$LOG_TMP" "$OUTPUT/execution.log"
 printf 'PROGRAM_EXIT=%s\nTEE_EXIT=%s\n' "$PROGRAM_EXIT" "$TEE_EXIT" \
   > "$OUTPUT/exit_code.txt"
@@ -115,16 +123,18 @@ path = output / "provenance.json"
 with path.open(encoding="utf-8") as handle:
     provenance = json.load(handle)
 assert provenance["completed"] is True
-assert provenance["variant"] == "frozen_joint_gradient_onset_window_character_composition_v1"
+assert provenance["variant"] == "frozen_joint_gradient_onset_window_character_composition_full_trial_v2"
 assert provenance["selected_loss_arms"] == {"stroke": "onset_window", "move": "onset_window"}
 assert provenance["policy_state_bitwise_unchanged"] == {"stroke": True, "move": True}
 assert provenance["training_started"] is False
 assert provenance["optimizer_created"] is False
 assert provenance["backward_executed"] is False
 assert provenance["trajectory_postprocessing_performed"] is False
+assert provenance["render_contract"]["trajectory"] == "actual_complete_trial_including_reset_state"
 assert provenance["integrity"]["total_trials"] == 27
 assert provenance["integrity"]["stroke_trials"] == 15
 assert provenance["integrity"]["move_trials"] == 12
+assert provenance["integrity"]["full_trial_render_verified"] is True
 assert provenance["integrity"]["plots"] == 4
 assert provenance["integrity"]["all_numeric_values_finite"] is True
 provenance.update(
@@ -150,6 +160,7 @@ sha256sum "$ARCHIVE" > "$ARCHIVE_SHA"
 rm "$LOG_TMP"
 
 echo "FROZEN_DUAL_CONTROLLER_COMPOSITION_COMPLETE=1"
+echo "FULL_TRIAL_RENDER=1"
 echo "TRAINING_STARTED=0"
 echo "TRAJECTORY_POSTPROCESSING_PERFORMED=0"
 echo "OUTPUT=$OUTPUT"

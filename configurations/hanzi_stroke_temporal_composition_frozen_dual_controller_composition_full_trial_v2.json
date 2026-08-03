@@ -1,7 +1,7 @@
 {
   "project": "hanzi_stroke_temporal_composition",
   "run_kind": "frozen_dual_controller_character_composition",
-  "variant": "frozen_joint_gradient_onset_window_character_composition_v1",
+  "variant": "frozen_joint_gradient_onset_window_character_composition_full_trial_v2",
   "enabled": true,
   "seed": 42,
   "device": "cpu",
@@ -44,13 +44,13 @@
     "deterministic_observation": true
   },
   "render": {
-    "trajectory": "actual_movement_phase_only",
+    "trajectory": "actual_complete_trial_including_reset_state",
     "stroke_linestyle": "solid",
     "move_linestyle": "dashed",
     "equal_aspect": true,
     "postprocessing": false
   },
   "output": {
-    "directory": "runs/hanzi_stroke_temporal_composition/frozen_dual_controller_character_composition/dev42"
+    "directory": "runs/hanzi_stroke_temporal_composition/frozen_dual_controller_character_composition_full_trial/dev42"
   }
 }

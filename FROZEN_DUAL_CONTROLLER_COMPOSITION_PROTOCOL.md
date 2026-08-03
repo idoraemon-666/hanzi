@@ -39,8 +39,11 @@ excluded. This most closely matches the independent-trial training contract.
 
 ## Rendering and interpretation
 
-Only actual movement-phase trajectories are rendered. Stroke segments use
-solid lines and Move segments use dashed lines. No endpoint snapping, spatial
+Every actual complete-trial trajectory is rendered from its reset state through
+all `stable`, `delay`, `movement`, and `hold` steps. The reset state is prepended
+to the post-action state sequence, so adjacent trials visibly meet at the
+actual endpoint-to-reset boundary. Complete Stroke trials use solid lines and
+complete Move trials use dashed lines. No endpoint snapping, spatial
 translation, smoothing, or other visual postprocessing is permitted.
 
 The output is a deterministic single-seed composition diagnostic. It does not

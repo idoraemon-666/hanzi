@@ -44,6 +44,10 @@ class FrozenDualControllerCompositionTests(unittest.TestCase):
         )
         self.assertFalse(self.config["composition"]["translate_canonical_target"])
         self.assertFalse(self.config["render"]["postprocessing"])
+        self.assertEqual(
+            self.config["render"]["trajectory"],
+            "actual_complete_trial_including_reset_state",
+        )
 
     def test_three_character_sequences_alternate_stroke_and_move(self) -> None:
         sequences = character_sequences(self.geometry)
@@ -105,15 +109,24 @@ class FrozenDualControllerCompositionTests(unittest.TestCase):
         self.assertNotIn(".backward(", source)
         self.assertNotIn("optimizer.step", source)
         self.assertIn('style = "-" if model_kind == "stroke" else "--"', source)
+        self.assertIn(
+            'points = segment["result"]["actual_full_with_reset"]', source
+        )
+        self.assertNotIn(
+            'points = segment["result"]["movement_actual"]', source
+        )
+        self.assertIn('hold_bounds[1] != timestep', source)
 
     def test_server_launcher_requires_frozen_authorization_and_archive(self) -> None:
         script = SERVER_SCRIPT.read_text(encoding="utf-8")
-        self.assertIn("frozen-dual-controller-composition-v1", script)
+        self.assertIn("frozen-dual-controller-full-trial-composition-v2", script)
         self.assertIn("test -z \"$(git -C \"$REPO\" status --short)\"", script)
         self.assertIn("test -f \"$SOURCE_RESULTS/provenance.json\"", script)
         self.assertIn("FROZEN_DUAL_CONTROLLER_COMPOSITION_COMPLETE=1", script)
         self.assertIn("TRAINING_STARTED=0", script)
         self.assertIn("TRAJECTORY_POSTPROCESSING_PERFORMED=0", script)
+        self.assertIn("FULL_TRIAL_RENDER=1", script)
+        self.assertIn("three_characters_actual_full_trial_composition.png", script)
 
 
 if __name__ == "__main__":

@@ -34,11 +34,11 @@ from train import _build_policy
 
 
 PROJECT = "hanzi_stroke_temporal_composition"
-VARIANT = "frozen_joint_gradient_onset_window_character_composition_v1"
+VARIANT = "frozen_joint_gradient_onset_window_character_composition_full_trial_v2"
 CONFIG_PATH = (
     Path(__file__).resolve().parents[1]
     / "configurations"
-    / "hanzi_stroke_temporal_composition_frozen_dual_controller_composition_v1.json"
+    / "hanzi_stroke_temporal_composition_frozen_dual_controller_composition_full_trial_v2.json"
 )
 CHARACTERS = ("mu", "jiang", "ke")
 EXPECTED_RULE_SEQUENCES = {
@@ -169,7 +169,7 @@ def load_config(
     }:
         raise ValueError("frozen composition boundary contract differs")
     if config["render"] != {
-        "trajectory": "actual_movement_phase_only",
+        "trajectory": "actual_complete_trial_including_reset_state",
         "stroke_linestyle": "solid",
         "move_linestyle": "dashed",
         "equal_aspect": True,
@@ -179,7 +179,7 @@ def load_config(
     if config["output"] != {
         "directory": (
             "runs/hanzi_stroke_temporal_composition/"
-            "frozen_dual_controller_character_composition/dev42"
+            "frozen_dual_controller_character_composition_full_trial/dev42"
         )
     }:
         raise ValueError("frozen composition output differs")
@@ -359,7 +359,22 @@ def _rollout_trial(
             timestep += 1
     actual = torch.cat(xy, dim=1)[0].detach().cpu().numpy() - env.anchor_m
     target = torch.cat(targets, dim=1)[0].detach().cpu().numpy() - env.anchor_m
-    movement_start, movement_end = env.epoch_bounds["movement"]
+    stable_bounds = env.epoch_bounds["stable"]
+    delay_bounds = env.epoch_bounds["delay"]
+    movement_bounds = env.epoch_bounds["movement"]
+    hold_bounds = env.epoch_bounds["hold"]
+    if (
+        stable_bounds[0] != 0
+        or stable_bounds[1] != delay_bounds[0]
+        or delay_bounds[1] != movement_bounds[0]
+        or movement_bounds[1] != hold_bounds[0]
+        or hold_bounds[1] != timestep
+        or actual.shape[0] != timestep
+        or target.shape[0] != timestep
+    ):
+        raise RuntimeError("complete-trial trajectory coverage differs")
+    actual_full_with_reset = np.concatenate((reset_xy[None, :], actual), axis=0)
+    movement_start, movement_end = movement_bounds
     expected_target = condition.points_m
     movement_target = target[movement_start:movement_end]
     if movement_target.shape != expected_target.shape or not np.allclose(
@@ -368,6 +383,7 @@ def _rollout_trial(
         raise RuntimeError("canonical composition target was translated or changed")
     return {
         "actual": actual,
+        "actual_full_with_reset": actual_full_with_reset,
         "target": target,
         "movement_actual": actual[movement_start:movement_end],
         "movement_target": movement_target,
@@ -425,9 +441,9 @@ def _plot_character(path: Path, character: str, segments: list[dict[str, Any]]) 
         color = "#1f4e79" if model_kind == "stroke" else "#888888"
         label = model_kind.capitalize() if model_kind not in labels else None
         labels.add(model_kind)
-        points = segment["result"]["movement_actual"]
+        points = segment["result"]["actual_full_with_reset"]
         axis.plot(points[:, 0], points[:, 1], style, color=color, linewidth=2.4, label=label)
-    axis.set_title(f"{character}: frozen Stroke/Move composition")
+    axis.set_title(f"{character}: frozen Stroke/Move complete-trial composition")
     axis.set_aspect("equal", adjustable="datalim")
     axis.grid(alpha=0.2)
     axis.legend()
@@ -448,13 +464,13 @@ def _plot_overview(path: Path, results: dict[str, list[dict[str, Any]]]) -> None
             color = "#1f4e79" if model_kind == "stroke" else "#888888"
             label = model_kind.capitalize() if model_kind not in labels else None
             labels.add(model_kind)
-            points = segment["result"]["movement_actual"]
+            points = segment["result"]["actual_full_with_reset"]
             axis.plot(points[:, 0], points[:, 1], style, color=color, linewidth=2.2, label=label)
         axis.set_title(character)
         axis.set_aspect("equal", adjustable="datalim")
         axis.grid(alpha=0.2)
         axis.legend(fontsize=8)
-    figure.suptitle("Frozen joint-gradient Stroke/Move character composition")
+    figure.suptitle("Frozen joint-gradient Stroke/Move complete-trial composition")
     figure.tight_layout()
     figure.savefig(path, dpi=220)
     plt.close(figure)
@@ -512,6 +528,9 @@ def run_composition(config_path: str | Path, source_results: str | Path) -> dict
             )
             prefix = f"segment_{segment_index:02d}_{condition.model_kind}_{condition.rule}"
             arrays[f"{prefix}__actual_full"] = result["actual"]
+            arrays[f"{prefix}__actual_full_with_reset"] = result[
+                "actual_full_with_reset"
+            ]
             arrays[f"{prefix}__target_full"] = result["target"]
             arrays[f"{prefix}__actual_movement"] = result["movement_actual"]
             arrays[f"{prefix}__target_movement"] = result["movement_target"]
@@ -521,12 +540,15 @@ def run_composition(config_path: str | Path, source_results: str | Path) -> dict
             next_start = previous_endpoint.copy()
         np.savez_compressed(output / f"{character}_composition_trajectories.npz", **arrays)
         _plot_character(
-            plot_directory / f"{character}_actual_composition.png",
+            plot_directory / f"{character}_actual_full_trial_composition.png",
             character,
             character_results,
         )
         all_results[character] = character_results
-    _plot_overview(plot_directory / "three_characters_actual_composition.png", all_results)
+    _plot_overview(
+        plot_directory / "three_characters_actual_full_trial_composition.png",
+        all_results,
+    )
 
     with (output / "character_segment_metrics.csv").open(
         "w", encoding="utf-8", newline=""
@@ -558,6 +580,12 @@ def run_composition(config_path: str | Path, source_results: str | Path) -> dict
         "total_trials": len(rows),
         "stroke_trials": sum(row["model_kind"] == "stroke" for row in rows),
         "move_trials": sum(row["model_kind"] == "move" for row in rows),
+        "full_trial_render_verified": all(
+            segment["result"]["actual_full_with_reset"].shape[0]
+            == segment["result"]["timesteps"] + 1
+            for segments in all_results.values()
+            for segment in segments
+        ),
         "maximum_start_offset_euclidean_m": max(
             row["start_offset_euclidean_m"] for row in rows
         ),
@@ -573,7 +601,9 @@ def run_composition(config_path: str | Path, source_results: str | Path) -> dict
         "macro-best checkpoints were frozen and alternated over complete trials.",
         "Every next trial reset MotorNet at the preceding actual endpoint.",
         "",
-        "Stroke trajectories are solid; Move trajectories are dashed.",
+        "Complete Stroke trial trajectories are solid; complete Move trial",
+        "trajectories are dashed. Reset, stable, delay, movement, and hold",
+        "states are all included.",
         "No trajectory postprocessing or training was performed.",
     ]
     (output / "FINAL_REPORT.md").write_text(
