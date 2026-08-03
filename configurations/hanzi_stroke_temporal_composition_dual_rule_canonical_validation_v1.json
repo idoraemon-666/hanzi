@@ -1,0 +1,65 @@
+{
+  "project": "hanzi_stroke_temporal_composition",
+  "run_kind": "frozen_dual_rule_canonical_validation",
+  "variant": "frozen_joint_gradient_onset_window_canonical_validation_full_trial_v1",
+  "enabled": true,
+  "seed": 42,
+  "device": "cpu",
+  "joint_gradient_config": "configurations/hanzi_stroke_temporal_composition_dual_fixed_rule_joint_gradient_v1.json",
+  "source": {
+    "variant": "dual_fixed_rule_joint_gradient_loss_comparison_v1",
+    "git_head": "e41238ef8dea6bc5d3ba7781ba9beb118086be62",
+    "submodule_head": "ac0c4f589eae37bbde63968912925de99232e306",
+    "resolved_config_sha256": "b286675560f95b22d3651a5dfbeffe009149dd4e422b3c5ea7b512c8c41d9ee1",
+    "provenance_sha256": "7bc4966fbd161d2d3e9a7c8b8bfd5668490e9f80e21e5c6801a654ac8a498441",
+    "condition_manifest_sha256": {
+      "stroke": "08141351f9b1d2edc16246409ec7c060643f663abc99aae4fbce8c7462448edb",
+      "move": "1ddcb6c276c9a733baeb2069c8544d0e20ccfb1f59066f7ef5db87ece59395e5"
+    },
+    "candidate_trajectories_sha256": {
+      "stroke": "fb082b7a0daf42d4113c52b1fcf26f059b59a16e3f208537ac6af2050621489a",
+      "move": "90efd4e644f7c9eac1f299b4b53c7cb25d06d25dd7984a463dbfa5cdf642f4f0"
+    },
+    "checkpoints": {
+      "stroke": {
+        "loss_arm": "onset_window",
+        "relative_path": "stroke/onset_window/best_macro_checkpoint.pt",
+        "sha256": "f04fceeecbe0fc298064224d12eaba46160ebebde96ed8b007bed96824b4108f",
+        "update": 7999
+      },
+      "move": {
+        "loss_arm": "onset_window",
+        "relative_path": "move/onset_window/best_macro_checkpoint.pt",
+        "sha256": "a6f5219dac6d1662d00e76b6ed713a92fcb5787befb7bb0d632ad3fde71ce005",
+        "update": 7599
+      }
+    }
+  },
+  "validation": {
+    "candidate": "best_macro",
+    "loss_arm": "onset_window",
+    "independent_rollout_per_rule": true,
+    "canonical_start_state": true,
+    "cross_task_state_carryover": false,
+    "effector_state_reset_each_rule": "canonical_standard_state",
+    "recurrent_state_reset_each_rule": true,
+    "feedback_buffers_reset_each_rule": true,
+    "network_noise": false,
+    "deterministic_observation": true,
+    "batch_size": 1,
+    "speed_name": "slow",
+    "delay_steps": 50
+  },
+  "render": {
+    "movement": "same_rollout_movement_epoch_including_first_and_last_samples",
+    "full_trial": "same_rollout_stable_delay_movement_hold",
+    "target_linestyle": "dashed_gray",
+    "actual_linestyle": "solid_blue",
+    "titles_only": true,
+    "equal_aspect": true,
+    "postprocessing": false
+  },
+  "output": {
+    "directory": "runs/hanzi_stroke_temporal_composition/frozen_dual_rule_canonical_validation/dev42"
+  }
+}
